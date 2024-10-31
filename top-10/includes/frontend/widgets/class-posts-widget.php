@@ -251,6 +251,10 @@ class Posts_Widget extends \WP_Widget {
 	public function widget( $args, $instance ) {
 		global $post;
 
+		if ( ! isset( $args['widget_id'] ) ) {
+			$args['widget_id'] = (string) $this->id;
+		}
+
 		if ( Display::exclude_on( $post, $args ) ) {
 			return;
 		}
