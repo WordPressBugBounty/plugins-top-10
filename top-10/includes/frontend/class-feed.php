@@ -43,7 +43,7 @@ class Feed {
 			add_feed( $popular_posts_overall, array( $this, 'pop_posts_feed_overall' ) );
 		}
 		if ( ! empty( $popular_posts_daily ) ) {
-			add_feed( $popular_posts_overall, array( $this, 'pop_posts_feed_daily' ) );
+			add_feed( $popular_posts_daily, array( $this, 'pop_posts_feed_daily' ) );
 		}
 	}
 
@@ -79,7 +79,6 @@ class Feed {
 	 * @return void
 	 */
 	public function pop_posts_feed_callback( $daily = false ) {
-		add_filter( 'pre_option_rss_use_excerpt', '__return_zero' );
 
 		set_query_var( 'daily', $daily );
 

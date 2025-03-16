@@ -4,7 +4,7 @@
  *
  * @since 3.3.0
  *
- * @package Top 10
+ * @package Top_Ten
  * @subpackage Util\Cache
  */
 
@@ -46,6 +46,7 @@ class Cache {
 
 		wp_send_json_success(
 			array(
+				/* translators: 1: Number of entries cleared. */
 				'message' => sprintf( _n( '%s entry cleared', '%s entries cleared', $count, 'top-10' ), number_format_i18n( $count ) ),
 			)
 		);

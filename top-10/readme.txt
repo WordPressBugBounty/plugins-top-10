@@ -2,7 +2,7 @@
 Tags: popular posts, top 10, counter, statistics, tracker
 Contributors: webberzone, ajay
 Donate link: https://ajaydsouza.com/donate/
-Stable tag: 4.0.3
+Stable tag: 4.1.0
 Requires at least: 6.3
 Tested up to: 6.7
 Requires PHP: 7.4
@@ -55,10 +55,12 @@ Top 10 also has powerful API and is fully extendable with WordPress actions and 
 * **Custom Display Options**
   - **Taxonomy-Specific Displays**: Use the `display_only_on_tax_ids` parameter to restrict popular post displays to specific taxonomy terms.
   - **Category Inclusion**: Include popular posts from specific categories using a new option in the Edit Post meta box.
+  - **RSS Feed Filtering**: Enhanced RSS feeds with category and post type filtering, available via URL parameters (?category=news, ?post_type=product) and dedicated settings.
 
 * **Enhanced Tracking and Performance**
   - **Fast Tracker**: A new, faster tracking method to improve post view speed.
   - **Query Filters**: Enable parent term inclusion in post queries for more accurate filtering.
+  - **Query Optimization**: Add MySQL MAX_EXECUTION_TIME directive to prevent long-running queries from consuming excessive server resources. Configurable via settings and the `top_ten_query_max_execution_time` filter.
 
 * **Developer-Friendly Features**
   - **Filters and Hooks**: New filters like `top_ten_query_exclude_terms_include_parents`, `top_ten_query_include_terms_include_parents`, and `get_tptn_short_circuit` for greater customisation.
@@ -149,6 +151,36 @@ When you enabled the scheduled maintenance, Top 10 will create a cron job that w
 
 == Changelog ==
 
+= 4.1.0 =
+
+Release post: [https://webberzone.com/announcements/top-10-v4-1-0/](https://webberzone.com/announcements/top-10-v4-1-0/)
+
+* Features:
+	* Import data from the WordPress Popular Posts plugin.
+	* [Pro] Query Optimization: Add MySQL MAX_EXECUTION_TIME directive to prevent long-running queries from consuming excessive server resources. Configurable via settings and the `top_ten_query_max_execution_time` filter.
+    * [Pro] Enhanced Popular Posts RSS feeds with category and post type filtering, available via URL parameters and configurable via dedicated settings.
+	* Admin Dashboard:
+		* Smart chart visualization: Automatically switches to an area chart for datasets with more than 100 data points.
+		* [Pro] Clicking on a column in the Popular Posts chart will display the most popular posts for the selected day.
+
+* Modifications:
+	* Updated ChartJS and replaced Moment adapter with Luxon.
+	* When any of the Top 10 tables is missing, an admin notice is displayed. The plugin also automatically recreates the missing tables.
+	* Introduced the `wz_top_ten()` function to return the Main instance of Top 10.
+
+* Bug fixes:
+	* Resolved issue where tables were not automatically created during plugin activation.
+	* Fixed issue where the popular posts feed always displayed the post's full content even when Excerpt was selected under Reading settings.
+	* Fixed "Not found" error when accessing the Daily Popular Posts feed.
+
+= 4.0.4 =
+
+* Modifications:
+	* Updated Freemius SDK to v2.11.0.
+
+* Bug fixes:
+	* Set correct type for `$settings_api` variable to `Settings_API`.
+
 = 4.0.3 =
 
 * Modifications:
@@ -210,5 +242,5 @@ For previous changelog entries, please refer to the separate changelog.txt file 
 
 == Upgrade Notice ==
 
-= 4.0.3 =
-Freemius SDK Updated. Minor other changes. Check out the release post or changelog for further information.
+= 4.1.0 =
+Enhancements: Improved performance optimizations. Updated Freemius SDK to the latest version. Added support for plugin dependencies. Enhanced the format of numbered lists. Renamed certain filters for clarity. Bug fixes: Resolved issues with admin column settings. Fixed meta_query parameter issues.

@@ -31,7 +31,7 @@ class Settings {
 	 *
 	 * @since 3.3.0
 	 *
-	 * @var object Settings API.
+	 * @var Settings_API Settings API.
 	 */
 	public $settings_api;
 
@@ -316,6 +316,22 @@ class Settings {
 				'type'    => 'multicheck',
 				'default' => 'administrator',
 				'options' => self::get_user_roles( array( 'administrator' ) ),
+				'pro'     => true,
+			),
+			'query_optimization'      => array(
+				'id'   => 'query_optimization',
+				'name' => '<h3>' . esc_html__( 'Query Optimization', 'top-10' ) . '</h3>',
+				'desc' => esc_html__( 'Settings for optimizing database queries', 'top-10' ),
+				'type' => 'header',
+			),
+			'max_execution_time'      => array(
+				'id'      => 'max_execution_time',
+				'name'    => esc_html__( 'Max Execution Time', 'top-10' ),
+				'desc'    => esc_html__( 'Maximum execution time for MySQL queries in milliseconds. Set to 0 to disable. Default is 3000 (3 seconds).', 'top-10' ),
+				'type'    => 'number',
+				'options' => 3000,
+				'min'     => 0,
+				'step'    => 100,
 				'pro'     => true,
 			),
 		);
@@ -1048,6 +1064,19 @@ class Settings {
 				'min'     => '0',
 				'size'    => 'small',
 			),
+			'feed_category_slugs'    => array(
+				'id'               => 'feed_category_slugs',
+				'name'             => esc_html__( 'Filter Categories', 'top-10' ),
+				'desc'             => esc_html__( 'Comma separated list of category slugs to include in the feed. The field has an autocomplete so simply start typing the starting letters and it will prompt you with options. Leave blank to include all categories.', 'top-10' ),
+				'type'             => 'csv',
+				'options'          => '',
+				'size'             => 'large',
+				'field_class'      => 'category_autocomplete',
+				'field_attributes' => array(
+					'data-wp-taxonomy' => 'category',
+				),
+				'pro'              => true,
+			),
 		);
 
 		/**
@@ -1341,7 +1370,7 @@ class Settings {
 	 */
 	public function admin_enqueue_scripts( $hook ) {
 
-		if ( ! isset( $this->settings_api->settings_page ) || $hook !== $this->settings_api->settings_page ) {
+		if ( empty( $this->settings_api->settings_page ) || $hook !== $this->settings_api->settings_page ) {
 			return;
 		}
 		wp_localize_script(
@@ -1379,6 +1408,7 @@ class Settings {
 
 		Settings_Sanitize::sanitize_tax_slugs( $settings, 'exclude_cat_slugs', 'exclude_categories' );
 		Settings_Sanitize::sanitize_tax_slugs( $settings, 'exclude_on_cat_slugs', 'exclude_on_categories' );
+		Settings_Sanitize::sanitize_tax_slugs( $settings, 'feed_category_slugs', 'feed_categories' );
 
 		// Save cron settings.
 		$settings['cron_hour'] = min( 23, absint( $settings['cron_hour'] ) );

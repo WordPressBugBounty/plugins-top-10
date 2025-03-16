@@ -1,6 +1,6 @@
 <?php
 /**
- * Autoloads classes from the WebberZone\Snippetz namespace.
+ * Autoloads classes from the WebberZone\Top_Ten namespace.
  *
  * @package WebberZone\Top_Ten
  */
@@ -16,6 +16,10 @@ if ( ! defined( 'ABSPATH' ) ) {
 function tptn_freemius() {
 	global $tptn_freemius;
 	if ( ! isset( $tptn_freemius ) ) {
+		// Activate multisite network integration.
+		if ( ! defined( 'WP_FS__PRODUCT_16384_MULTISITE' ) ) {
+			define( 'WP_FS__PRODUCT_16384_MULTISITE', true );
+		}
 		// Include Freemius SDK.
 		require_once TOP_TEN_PLUGIN_DIR . 'freemius/start.php';
 		$tptn_freemius = \fs_dynamic_init(

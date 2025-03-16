@@ -5,7 +5,7 @@
  * @link https://webberzone.com
  * @since 3.0.0
  *
- * @package Top 10
+ * @package Top_Ten
  * @subpackage Admin/Dashboard
  */
 
@@ -99,8 +99,20 @@ class Dashboard {
 				<ul class="nav-tab-wrapper" style="padding:0; border-bottom: 1px solid #ccc;">
 					<?php
 					foreach ( $this->get_tabs() as $tab_id => $tab_name ) {
+						$tab_class = 'nav-tab';
+						$tab_style = '';
 
-						echo '<li style="padding:0; border:0; margin:0;"><a href="#' . esc_attr( $tab_id ) . '" title="' . esc_attr( $tab_name['title'] ) . '" class="nav-tab">';
+						// Check if this tab should be hidden initially.
+						if ( isset( $tab_name['hide'] ) && $tab_name['hide'] ) {
+							$tab_style = 'display:none;';
+						}
+
+						// Add custom class if specified.
+						if ( isset( $tab_name['class'] ) ) {
+							$tab_class .= ' ' . $tab_name['class'];
+						}
+
+						echo '<li style="padding:0; border:0; margin:0;"><a href="#' . esc_attr( $tab_id ) . '" title="' . esc_attr( $tab_name['title'] ) . '" class="' . esc_attr( $tab_class ) . '" style="' . esc_attr( $tab_style ) . '">';
 							echo esc_html( $tab_name['title'] );
 						echo '</a></li>';
 
@@ -215,7 +227,7 @@ class Dashboard {
 			wp_enqueue_script( 'moment' );
 			wp_enqueue_script( 'top-ten-chart-js' );
 			wp_enqueue_script( 'top-ten-chart-datalabels-js' );
-			wp_enqueue_script( 'top-ten-chartjs-adapter-moment-js' );
+			wp_enqueue_script( 'top-ten-chartjs-adapter-luxon-js' );
 			wp_enqueue_script( 'top-ten-chart-data-js' );
 			wp_enqueue_script( 'top-ten-admin-js' );
 			wp_localize_script(
@@ -320,6 +332,15 @@ class Dashboard {
 				'daily' => false,
 			),
 		);
+
+		/**
+		 * Filters the tabs for the admin dashboard.
+		 *
+		 * @since 4.1.0
+		 *
+		 * @param array $tabs Array of tabs.
+		 */
+		$tabs = apply_filters( 'tptn_admin_dashboard_tabs', $tabs );
 
 		return $tabs;
 	}
