@@ -2,9 +2,9 @@
 Tags: popular posts, top 10, counter, statistics, tracker
 Contributors: webberzone, ajay
 Donate link: https://ajaydsouza.com/donate/
-Stable tag: 4.1.0
+Stable tag: 4.1.1
 Requires at least: 6.3
-Tested up to: 6.7
+Tested up to: 6.8
 Requires PHP: 7.4
 License: GPLv2 or later
 
@@ -151,6 +151,11 @@ When you enabled the scheduled maintenance, Top 10 will create a cron job that w
 
 == Changelog ==
 
+= 4.1.1 =
+
+* Bug fixes:
+    * Fixed an issue where shortcode attributes were not properly sanitized.
+
 = 4.1.0 =
 
 Release post: [https://webberzone.com/announcements/top-10-v4-1-0/](https://webberzone.com/announcements/top-10-v4-1-0/)
@@ -242,5 +247,5 @@ For previous changelog entries, please refer to the separate changelog.txt file 
 
 == Upgrade Notice ==
 
-= 4.1.0 =
-Enhancements: Improved performance optimizations. Updated Freemius SDK to the latest version. Added support for plugin dependencies. Enhanced the format of numbered lists. Renamed certain filters for clarity. Bug fixes: Resolved issues with admin column settings. Fixed meta_query parameter issues.
+= 4.1.1 =
+Bug fixes: Properly sanitized shortcode inputs.
