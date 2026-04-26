@@ -2,9 +2,9 @@
 Tags: popular posts, post views, page views, most viewed posts, popular posts widget, trending posts, post views counter, multisite, block, shortcode
 Contributors: webberzone, ajay
 Donate link: https://wzn.io/donate-wz
-Stable tag: 4.2.1
+Stable tag: 4.2.3
 Requires at least: 6.6
-Tested up to: 6.9
+Tested up to: 7.0
 Requires PHP: 7.4
 License: GPLv2 or later
 
@@ -94,6 +94,7 @@ Fork the project and submit pull requests for bug fixes or improvements. Please 
 * [Auto-Close](https://wordpress.org/plugins/autoclose/) – Automatically close comments, pingbacks, and trackbacks
 * [Popular Authors](https://wordpress.org/plugins/popular-authors/) – Display popular authors widgets. Addon for Top 10.
 * [Followed Posts](https://wordpress.org/plugins/where-did-they-go-from-here/) – Show related posts based on reader journeys
+* [WebberZone Link Warnings](https://wordpress.org/plugins/webberzone-link-warnings/) – Add accessible warnings for external links and target="_blank" links
 
 == Screenshots ==
 
@@ -155,6 +156,28 @@ The Patchstack team help validate, triage and handle any security vulnerabilitie
 
 == Changelog ==
 
+= 4.2.3 =
+
+* Security:
+	* Hardened Settings API and metabox output escaping.
+
+* Improvements:
+	* Updated Freemius SDK to version 2.13.1.
+	* Updated Settings API assets and Tom Select handling.
+	* Refreshed translations and generated assets.
+
+* Fixes:
+	* Fixed metabox screen handling when `get_current_screen()` is unavailable.
+	* Fixed admin notices package tags.
+
+= 4.2.2 =
+
+* Modifications:
+	* Taxonomy Suggest script removed from Settings API. Metabox also uses Tom Select for the lookup of the category field in CRP Pro.
+
+* Fixes:
+	* CSS improvements for left-thumbs and grid-thumbs styles.
+
 = 4.2.1 =
 
 * Security:
@@ -200,5 +223,8 @@ Release post: [https://webberzone.com/announcements/top-10-v4-2-0/](https://webb
 
 == Upgrade Notice ==
 
-= 4.2.1 =
-Bugs squashed from the v4.2.0 release.
+= 4.2.3 =
+Security hardening, Settings API updates, and bug fixes.
+
+= 4.2.2 =
+Bugs squashed from previous releases.

@@ -2,7 +2,7 @@
 /**
  * Class to display and save a Metabox.
  *
- * @package WebberZone\Better_External_Links
+ * @package WebberZone\Top_Ten
  */
 
 namespace WebberZone\Top_Ten\Admin\Settings;
@@ -255,7 +255,7 @@ class Metabox_API {
 			$callback      = method_exists( $settings_form, "callback_{$type}" ) ? array( $settings_form, "callback_{$type}" ) : array( $settings_form, 'callback_missing' );
 
 			echo '<tr>';
-			echo '<th scope="row">' . $args['name'] . '</th>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+			echo '<th scope="row">' . wp_kses_post( $args['name'] ) . '</th>';
 			echo '<td>';
 			call_user_func( $callback, $args );
 			echo '</td>';
