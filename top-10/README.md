@@ -10,7 +10,7 @@
 
 __Requires:__ 6.6
 
-__Tested up to:__ 6.9
+__Tested up to:__ 7.0
 
 __Requires PHP:__ 7.4
 
@@ -53,6 +53,7 @@ Top 10 also exposes a powerful API with WordPress actions and filters, allowing 
 
 * __Enhanced Tracking and Performance__
   * __Fast and High-Traffic Trackers__: Alternative tracking methods for improved performance on busy sites
+  * __Buffered Visit Tracking__: Every page view is written to a lightweight funnel table first, then aggregated into the count tables by a background cron job every 5 minutes. This eliminates write contention on high-traffic posts where many simultaneous visitors would otherwise compete to update the same row
   * __Query Optimisation__: MySQL `MAX_EXECUTION_TIME` directive to prevent long-running queries, configurable via settings and the `top_ten_query_max_execution_time` filter
   * __Data Retention Override__: Customizable data retention period (default 180 days via `TOP_TEN_STORE_DATA`)
 
@@ -75,6 +76,16 @@ Top 10 also exposes a powerful API with WordPress actions and filters, allowing 
   * __Taxonomy-Specific Displays__: `display_only_on_tax_ids` parameter to restrict popular post displays to specific taxonomy terms
   * __Category Inclusion__: Edit Post meta box option to include popular posts from specific categories
   * __RSS Feed Filtering__: Filter RSS feeds by category or post type via settings or URL parameters
+
+* __WP-CLI Integration__
+  * __`wp top10 counts`__: View, get, set, reset, export, and import post view counts from the command line
+  * __`wp top10 db`__: Manage database tables — check status, create, update, recreate, prune old rows, force aggregation, truncate, and clean up orphaned counts
+  * __`wp top10 cache`__: Flush, enable, disable, and check the status of the output cache
+  * __`wp top10 settings`__: Get, set, export, and import plugin settings as JSON
+  * __`wp top10 cron`__: View, enable, disable, and manually trigger the maintenance and aggregation cron jobs
+  * __`wp top10 popular`__: List popular posts with counts using the same query as the front end
+  * __`wp top10 status`__: Print a full plugin status overview
+  * All destructive commands support `--dry-run` and `--force`; multisite commands support `--network` and `--blog-id`
 
 * __Developer-Friendly Features__
   * __Custom Post Type Sortable Columns__: Admin columns on supported custom post types with sortable functionality

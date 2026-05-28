@@ -2,7 +2,7 @@
 Tags: popular posts, post views, page views, most viewed posts, popular posts widget, trending posts, post views counter, multisite, block, shortcode
 Contributors: webberzone, ajay
 Donate link: https://wzn.io/donate-wz
-Stable tag: 4.2.3
+Stable tag: 4.3.0
 Requires at least: 6.6
 Tested up to: 7.0
 Requires PHP: 7.4
@@ -65,6 +65,16 @@ Top 10 also exposes a powerful API with WordPress actions and filters, allowing 
   * __Taxonomy-Specific Displays__: `display_only_on_tax_ids` parameter to restrict popular post displays to specific taxonomy terms
   * __Category Inclusion__: Edit Post meta box option to include popular posts from specific categories
   * __RSS Feed Filtering__: Filter RSS feeds by category or post type via settings or URL parameters
+
+* __WP-CLI Integration__
+  * __`wp top10 counts`__: View, get, set, reset, export, and import post view counts from the command line
+  * __`wp top10 db`__: Manage database tables — check status, create, update, recreate, prune old rows, force aggregation, truncate, and clean up orphaned counts
+  * __`wp top10 cache`__: Flush, enable, disable, and check the status of the output cache
+  * __`wp top10 settings`__: Get, set, export, and import plugin settings as JSON
+  * __`wp top10 cron`__: View, enable, disable, and manually trigger the maintenance and aggregation cron jobs
+  * __`wp top10 popular`__: List popular posts with counts using the same query as the front end
+  * __`wp top10 status`__: Print a full plugin status overview
+  * All destructive commands support `--dry-run` and `--force`; multisite commands support `--network` and `--blog-id`
 
 * __Developer-Friendly Features__
   * __Custom Post Type Sortable Columns__: Admin columns on supported custom post types with sortable functionality
@@ -141,6 +151,12 @@ to users with an active, valid licence. Licensed users can request support [here
 
 No. Top 10 tracks page views and displays popular posts. It is not designed to replace analytics platforms.
 
+= How does tracking work? =
+
+Each visit is queued in a lightweight funnel table and aggregated into the count tables every five minutes by a cron job, so tracking never blocks page loads and works correctly behind page caches.
+
+For a full explanation of tracker types, the funnel flow, and how to adjust the aggregation interval, see [Trackers in Top 10](https://webberzone.com/support/knowledgebase/trackers-in-top-10/).
+
 = How does scheduled maintenance work? =
 
 When enabled, Top 10 runs a scheduled task that periodically removes old entries
@@ -155,6 +171,33 @@ The Patchstack team help validate, triage and handle any security vulnerabilitie
 [Report a security vulnerability.](https://patchstack.com/database/vdp/top-10)
 
 == Changelog ==
+
+= 4.3.0 =
+
+*Release Date - 28 May 2026*
+
+* [Release announcement](https://webberzone.com/announcements/top-10-v4-3-0/)
+
+* New:
+	* Buffered visit tracking: page views are queued in a funnel table and aggregated every 5 minutes, reducing write contention on busy sites.
+	* [Pro] RSS/Atom feed views are now counted. Enable under Counter settings > Track feed views.
+	* [Pro] Dashboard At a Glance widget now shows views for the current hour and today.
+	* [Pro] Full `wp top10` WP-CLI suite: counts, database, cache, settings, cron, and popular posts commands. All destructive commands support `--dry-run` and `--force`; multisite commands support `--network` and `--blog-id`.
+
+* Improvements:
+	* Scheduled maintenance deletes old daily rows in batches to prevent timeouts on large databases.
+	* New index on the daily table speeds up maintenance queries. Apply it to existing installs via Recreate Primary Key under Tools.
+
+* Fixed:
+	* Cache setting was referencing the wrong key, preventing posts from ever being cached.
+	* Database version was recorded before upgrade routines ran, causing upgrades to be silently skipped on re-activation.
+	* Daily queries now work on MySQL servers with ONLY_FULL_GROUP_BY enabled.
+	* Posts with identical counts now display in a consistent order when paginated.
+	* Daily counts now use the site's configured timezone instead of server time.
+	* Dashboard "Total visits" now matches the chart total rather than summing only the top 20 posts.
+	* Popular posts ordering no longer overridden by Post Types Order and similar plugins.
+	* Deactivation now clears both cron jobs and sets the settings option to not autoload.
+	* Removed incorrect `wpmu_drop_tables` filter that tried to drop network-wide tables on site deletion.
 
 = 4.2.3 =
 
@@ -223,8 +266,5 @@ Release post: [https://webberzone.com/announcements/top-10-v4-2-0/](https://webb
 
 == Upgrade Notice ==
 
-= 4.2.3 =
-Security hardening, Settings API updates, and bug fixes.
-
-= 4.2.2 =
-Bugs squashed from previous releases.
+= 4.3.0 =
+This release introduces buffered visit tracking with a new funnel table. Existing daily-count table indexes are updated automatically for new installs — existing sites should run "Recreate Primary Key" under Tools > Top 10 to apply the performance improvement. Pro users also get feed view tracking and a full WP-CLI command suite.

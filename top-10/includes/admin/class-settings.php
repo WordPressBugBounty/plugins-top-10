@@ -487,6 +487,14 @@ class Settings {
 				'type'    => 'checkbox',
 				'default' => false,
 			),
+			'track_feed_views'     => array(
+				'id'      => 'track_feed_views',
+				'name'    => esc_html__( 'Track feed views', 'top-10' ),
+				'desc'    => esc_html__( 'Count post views from RSS/Atom feed readers via a tracking pixel. Views are added to the post\'s regular view count. Note: some feed readers block remote images by default; views are only counted when the reader loads images.', 'top-10' ),
+				'type'    => 'checkbox',
+				'default' => false,
+				'pro'     => true,
+			),
 			'track_users'          => array(
 				'id'      => 'track_users',
 				'name'    => esc_html__( 'Track user groups', 'top-10' ) . ':',
@@ -963,7 +971,7 @@ class Settings {
 	 */
 	public static function settings_maintenance() {
 		$settings = array(
-			'cron_on'          => array(
+			'cron_on'            => array(
 				'id'      => 'cron_on',
 				'name'    => esc_html__( 'Enable scheduled maintenance', 'top-10' ),
 				'desc'    => sprintf(
@@ -974,9 +982,9 @@ class Settings {
 				'type'    => 'checkbox',
 				'default' => false,
 			),
-			'maintenance_days' => array(
+			'maintenance_days'   => array(
 				'id'      => 'maintenance_days',
-				'name'    => esc_html__( 'Data retention period', 'top-10' ),
+				'name'    => esc_html__( 'Daily table retention period', 'top-10' ),
 				'desc'    => sprintf(
 					/* translators: 1: Constant holding number of days data is stored. */
 					esc_html__( 'Enter the number of days to retain data in the daily tables before scheduled maintenance removes older entries. Enter 0 to use the default value of %s days.', 'top-10' ),
@@ -988,13 +996,27 @@ class Settings {
 				'size'    => 'small',
 				'pro'     => true,
 			),
-			'cron_range_desc'  => array(
+			'log_retention_days' => array(
+				'id'      => 'log_retention_days',
+				'name'    => esc_html__( 'Visits log retention period', 'top-10' ),
+				'desc'    => sprintf(
+					/* translators: 1: Default number of days for visits log retention. */
+					esc_html__( 'Enter the number of days to retain raw visit rows in the visits log table. The log stores one row per visit and grows faster than the daily table, so a shorter window is recommended. Enter 0 to use the default value of %s days.', 'top-10' ),
+					'<strong>' . TOP_TEN_LOG_STORE_DATA . '</strong>'
+				),
+				'type'    => 'number',
+				'default' => 0,
+				'min'     => 0,
+				'size'    => 'small',
+				'pro'     => true,
+			),
+			'cron_range_desc'    => array(
 				'id'   => 'cron_range_desc',
 				'name' => esc_html__( 'Time to run maintenance', 'top-10' ),
 				'desc' => esc_html__( 'The next two options allow you to set the time to run the cron.', 'top-10' ),
 				'type' => 'descriptive_text',
 			),
-			'cron_hour'        => array(
+			'cron_hour'          => array(
 				'id'      => 'cron_hour',
 				'name'    => esc_html__( 'Hour', 'top-10' ),
 				'desc'    => '',
@@ -1004,7 +1026,7 @@ class Settings {
 				'max'     => '23',
 				'size'    => 'small',
 			),
-			'cron_min'         => array(
+			'cron_min'           => array(
 				'id'      => 'cron_min',
 				'name'    => esc_html__( 'Minute', 'top-10' ),
 				'desc'    => '',
@@ -1014,7 +1036,7 @@ class Settings {
 				'max'     => '59',
 				'size'    => 'small',
 			),
-			'cron_recurrence'  => array(
+			'cron_recurrence'    => array(
 				'id'      => 'cron_recurrence',
 				'name'    => esc_html__( 'Run maintenance', 'top-10' ),
 				'desc'    => '',
@@ -1642,10 +1664,6 @@ class Settings {
 			$tax        = null;
 
 			foreach ( $taxonomies as $taxonomy_name => $taxonomy_object ) {
-				if ( ! is_string( $taxonomy_name ) || '' === $taxonomy_name ) {
-					continue;
-				}
-
 				if ( empty( $taxonomy_object->cap->assign_terms ) ) {
 					continue;
 				}
@@ -1654,7 +1672,7 @@ class Settings {
 					continue;
 				}
 
-				$taxonomy[] = $taxonomy_name;
+				$taxonomy[] = $taxonomy_object->name;
 			}
 
 			if ( empty( $taxonomy ) ) {

@@ -137,7 +137,7 @@ class Top_Ten_Core_Query extends \WP_Query {
 		Hook_Registry::add_filter( 'posts_fields', array( $this, 'posts_fields' ), 10, 2 );
 		Hook_Registry::add_filter( 'posts_join', array( $this, 'posts_join' ), 10, 2 );
 		Hook_Registry::add_filter( 'posts_where', array( $this, 'posts_where' ), 10, 2 );
-		Hook_Registry::add_filter( 'posts_orderby', array( $this, 'posts_orderby' ), 10, 2 );
+		Hook_Registry::add_filter( 'posts_orderby', array( $this, 'posts_orderby' ), 9999, 2 );
 		Hook_Registry::add_filter( 'posts_groupby', array( $this, 'posts_groupby' ), 10, 2 );
 		Hook_Registry::add_filter( 'posts_clauses', array( $this, 'posts_clauses' ), 20, 2 );
 		Hook_Registry::add_filter( 'posts_request', array( $this, 'posts_request' ), 20, 2 );
@@ -161,7 +161,7 @@ class Top_Ten_Core_Query extends \WP_Query {
 	 *     @type bool          $daily            Set to true to get the daily/custom period posts. False for overall.
 	 *     @type array|string  $include_cat_ids  An array or comma-separated string of category/custom taxonomy term_taxonomy_ids.
 	 *     @type array|string  $include_post_ids An array or comma-separated string of post IDs.
-	 *     @type bool          $offset           Offset the related posts returned by this number.
+	 *     @type int           $offset           Offset the related posts returned by this number.
 	 *     @type bool          $strict_limit     If this is set to false, then it will fetch 3x posts.
 	 * }
 	 */
@@ -471,6 +471,7 @@ class Top_Ten_Core_Query extends \WP_Query {
 				'post_type',
 				'post_status',
 				'posts_per_page',
+				'offset',
 				'author',
 			);
 
@@ -611,16 +612,9 @@ class Top_Ten_Core_Query extends \WP_Query {
 	}
 
 	/**
-	 * Modify the posts_orderby clause.
+	 * Modify the ORDER BY clause of the query.
 	 *
 	 * @since 3.0.0
-	 *
-	 * @param string    $orderby  The ORDER BY clause of the query.
-	 * @param \WP_Query $query    The \WP_Query instance.
-	 * @return string  Updated ORDER BY
-	 */
-	/**
-	 * Modify the ORDER BY clause of the query.
 	 *
 	 * @param string    $orderby The current ORDER BY clause.
 	 * @param \WP_Query $query   The current query instance.
@@ -633,18 +627,16 @@ class Top_Ten_Core_Query extends \WP_Query {
 		}
 
 		// Use WP_Query's parse_order method to get a valid order.
-		$order         = method_exists( $query, 'parse_order' ) ? $query->parse_order( $query->get( 'order' ) ) : 'DESC';
-		$orderby_count = $this->is_daily ? "SUM({$this->table_name}.cntaccess) $order" : "{$this->table_name}.cntaccess $order";
+		$query_orderby = $query->get( 'orderby' );
+		$order         = $query->parse_order( $query->get( 'order' ) );
 
-		// If orderby is set, then this was done intentionally and we don't make any modifications.
-		if ( ! empty( $query->get( 'orderby' ) ) ) {
-			if ( 'visits' === $query->get( 'orderby' ) ) {
-				$orderby = $orderby_count;
-			}
-			return apply_filters_ref_array( 'top_ten_query_posts_orderby', array( $orderby, &$this ) );
+		// Preserve intentional orderby values except the plugin's visits alias.
+		if ( is_array( $query_orderby ) && isset( $query_orderby['visits'] ) ) {
+			$visits_order = $query->parse_order( $query_orderby['visits'] );
+			$orderby      = empty( $orderby ) ? "visits $visits_order, {$this->table_name}.postnumber $visits_order" : "visits $visits_order, {$orderby}";
+		} elseif ( empty( $query_orderby ) || 'visits' === $query_orderby ) {
+			$orderby = "visits $order, {$this->table_name}.postnumber $order";
 		}
-
-		$orderby = $orderby_count;
 
 		/**
 		 * Filters the ORDER BY clause of Top_Ten_Core_Query.
@@ -656,7 +648,7 @@ class Top_Ten_Core_Query extends \WP_Query {
 		 */
 		$orderby = apply_filters_ref_array( 'top_ten_query_posts_orderby', array( $orderby, &$this ) );
 
-		remove_filter( 'posts_orderby', array( $this, 'posts_orderby' ) );
+		remove_filter( 'posts_orderby', array( $this, 'posts_orderby' ), 9999 );
 
 		return $orderby;
 	}
