@@ -160,17 +160,34 @@ class Tools_Page {
 
 		/* Recreate tables */
 		if ( isset( $_POST['tptn_recreate_tables'] ) && check_admin_referer( 'tptn-tools-settings' ) ) {
-			self::recreate_tables();
-			add_settings_error( 'tptn-notices', '', esc_html__( 'Top 10 tables have been recreated', 'top-10' ), 'updated' );
+			$result = self::recreate_tables();
+			if ( is_wp_error( $result ) ) {
+				add_settings_error( 'tptn-notices', '', $result->get_error_message(), 'error' );
+			} else {
+				add_settings_error( 'tptn-notices', '', esc_html__( 'Top 10 tables have been recreated', 'top-10' ), 'updated' );
+			}
 		}
 
 		/* Sync funnel (run aggregation now) */
 		if ( isset( $_POST['tptn_sync_funnel'] ) && check_admin_referer( 'tptn-tools-settings' ) ) {
 			$result = Database::aggregate_visit_log();
-			if ( $result ) {
+			if ( true === $result ) {
 				add_settings_error( 'tptn-notices', '', esc_html__( 'Funnel has been synced. Buffered visits have been aggregated.', 'top-10' ), 'updated' );
-			} else {
-				add_settings_error( 'tptn-notices', '', esc_html__( 'Nothing to sync. The funnel is empty or another sync is in progress.', 'top-10' ), 'updated' );
+			} elseif ( 0 === $result ) {
+				add_settings_error( 'tptn-notices', '', esc_html__( 'Nothing to sync. The funnel is empty.', 'top-10' ), 'updated' );
+			} elseif ( false === $result ) {
+				add_settings_error( 'tptn-notices', '', esc_html__( 'Sync skipped: another aggregation is already in progress. Please try again in a moment.', 'top-10' ), 'updated' );
+			} elseif ( is_wp_error( $result ) ) {
+				add_settings_error(
+					'tptn-notices',
+					'',
+					sprintf(
+						/* translators: %s: error message from the database */
+						esc_html__( 'Sync failed: %s', 'top-10' ),
+						esc_html( $result->get_error_message() )
+					),
+					'error'
+				);
 			}
 		}
 
@@ -371,38 +388,29 @@ class Tools_Page {
 	 * @since 2.7.0
 	 */
 	public static function recreate_tables() {
-		global $wpdb;
+		$errors = new \WP_Error();
 
-		$table_name            = Database::get_table( false );
-		$table_name_daily      = Database::get_table( true );
-		$table_name_temp       = $table_name . '_temp';
-		$table_name_daily_temp = $table_name_daily . '_temp';
-
-		$wpdb->hide_errors();
-
-		// Overall table.
-		$wpdb->query( "DROP TEMPORARY TABLE IF EXISTS {$table_name_temp}" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.SchemaChange, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-		$result_temp = $wpdb->query( "CREATE TEMPORARY TABLE {$table_name_temp} SELECT * FROM {$table_name};" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.SchemaChange, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-
-		if ( false !== $result_temp ) {
-			$wpdb->query( "DROP TABLE {$table_name}" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.SchemaChange, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.DirectQuery
-			Activator::single_activate();
-			$wpdb->query( "INSERT INTO `{$table_name}` (postnumber, cntaccess, blog_id) SELECT postnumber, cntaccess, blog_id FROM `{$table_name_temp}`;" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-			$wpdb->query( "DROP TEMPORARY TABLE {$table_name_temp}" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.SchemaChange, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.DirectQuery
+		$result = Database::recreate_overall_table( false );
+		if ( is_wp_error( $result ) ) {
+			$errors->merge_from( $result );
 		}
 
-		// Daily table.
-		$wpdb->query( "DROP TEMPORARY TABLE IF EXISTS {$table_name_daily_temp}" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.SchemaChange, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-		$result_daily_temp = $wpdb->query( "CREATE TEMPORARY TABLE {$table_name_daily_temp} SELECT * FROM {$table_name_daily};" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.SchemaChange, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-
-		if ( false !== $result_daily_temp ) {
-			$wpdb->query( "DROP TABLE {$table_name_daily}" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.SchemaChange, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.DirectQuery
-			Activator::single_activate();
-			$wpdb->query( "INSERT INTO `{$table_name_daily}` (postnumber, cntaccess, dp_date, blog_id) SELECT postnumber, cntaccess, dp_date, blog_id FROM `{$table_name_daily_temp}`;" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-			$wpdb->query( "DROP TEMPORARY TABLE {$table_name_daily_temp}" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.SchemaChange, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.DirectQuery
+		$result = Database::recreate_daily_table( false );
+		if ( is_wp_error( $result ) ) {
+			$errors->merge_from( $result );
 		}
 
-		$wpdb->show_errors();
+		$result = Database::recreate_funnel_table( false );
+		if ( is_wp_error( $result ) ) {
+			$errors->merge_from( $result );
+		}
+
+		$result = Database::recreate_log_table( false );
+		if ( is_wp_error( $result ) ) {
+			$errors->merge_from( $result );
+		}
+
+		return $errors->has_errors() ? $errors : true;
 	}
 
 	/**
@@ -551,7 +559,13 @@ class Tools_Page {
 				'tptn_aggregation_cron_hook' => __( 'Aggregation cron', 'top-10' ),
 			);
 			foreach ( $cron_jobs as $hook => $label ) :
-				$next_run = wp_next_scheduled( $hook );
+				$next_run         = wp_next_scheduled( $hook );
+				$recurrence       = $next_run ? wp_get_schedule( $hook ) : false;
+				$schedules        = wp_get_schedules();
+				$interval_display = '';
+				if ( $recurrence && isset( $schedules[ $recurrence ]['display'] ) ) {
+					$interval_display = $schedules[ $recurrence ]['display'];
+				}
 				?>
 				<tr>
 					<th scope="row"><?php echo esc_html( $label ); ?></th>
@@ -560,9 +574,18 @@ class Tools_Page {
 							<span style="color: #006400;"><?php esc_html_e( 'Scheduled', 'top-10' ); ?></span>
 							<br><span class="description">
 								<?php
+								if ( $interval_display ) {
+									printf(
+										/* translators: %s: schedule display name e.g. "Every two minutes" */
+										esc_html__( 'Runs: %s', 'top-10' ),
+										esc_html( $interval_display )
+									);
+									echo '<br>';
+								}
 								printf(
 									/* translators: %s: human-readable time difference */
 									esc_html__( 'Next run: %s', 'top-10' ),
+									/* translators: %s: human-readable time difference */
 									esc_html( sprintf( __( 'in %s', 'top-10' ), human_time_diff( time(), $next_run ) ) )
 								);
 								?>
@@ -654,6 +677,8 @@ class Tools_Page {
 		// Recreate tables.
 		$result_overall = Database::recreate_overall_table( false );
 		$result_daily   = Database::recreate_daily_table( false );
+		$result_funnel  = Database::recreate_funnel_table( false );
+		$result_log     = Database::recreate_log_table( false );
 
 		// Check for errors.
 		if ( is_wp_error( $result_overall ) ) {
@@ -674,8 +699,26 @@ class Tools_Page {
 			);
 		}
 
+		if ( is_wp_error( $result_funnel ) ) {
+			add_settings_error(
+				'tptn-notices',
+				'tptn-recreate-funnel-error',
+				$result_funnel->get_error_message(),
+				'error'
+			);
+		}
+
+		if ( is_wp_error( $result_log ) ) {
+			add_settings_error(
+				'tptn-notices',
+				'tptn-recreate-log-error',
+				$result_log->get_error_message(),
+				'error'
+			);
+		}
+
 		// If no errors, add success message.
-		if ( ! is_wp_error( $result_overall ) && ! is_wp_error( $result_daily ) ) {
+		if ( ! is_wp_error( $result_overall ) && ! is_wp_error( $result_daily ) && ! is_wp_error( $result_funnel ) && ! is_wp_error( $result_log ) ) {
 			add_settings_error(
 				'tptn-notices',
 				'tptn-recreate-success',

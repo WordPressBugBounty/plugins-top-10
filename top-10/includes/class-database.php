@@ -716,34 +716,44 @@ class Database {
 	 * @since 4.3.0
 	 *
 	 * @param int $batch_size Maximum funnel rows to process per run.
-	 * @return bool True if rows were processed, false if none found or lock not acquired.
+	 * @return true|false|int|\WP_Error True if rows processed, false if lock not acquired, 0 if funnel empty, WP_Error on DB failure.
 	 */
 	public static function aggregate_visit_log( $batch_size = 10000 ) {
 		global $wpdb;
 
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
-		$lock_acquired = $wpdb->get_var( "SELECT GET_LOCK('tptn_aggregation', 0)" );
-		if ( '1' !== (string) $lock_acquired ) {
-			return false;
-		}
+		// Detect SQLite (e.g. WordPress Playground) vs MySQL/MariaDB.
+		// DATABASE_TYPE is defined by the WordPress SQLite Database Integration drop-in.
+		$is_sqlite = ( defined( 'DATABASE_TYPE' ) && 'sqlite' === DATABASE_TYPE )
+			|| false !== strpos( strtolower( (string) $wpdb->db_server_info() ), 'sqlite' );
 
 		$funnel_table = self::get_funnel_table();
 		$log_table    = self::get_log_table();
 		$daily_table  = self::get_table( true );
 		$full_table   = self::get_table( false );
 
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
-		if ( false === $wpdb->query( 'START TRANSACTION' ) ) {
-			$wpdb->query( "SELECT RELEASE_LOCK('tptn_aggregation')" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
-			return false;
+		// MySQL-specific locking and transactions.
+		if ( ! $is_sqlite ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$lock_acquired = $wpdb->get_var( "SELECT GET_LOCK('tptn_aggregation', 0)" );
+			if ( '1' !== (string) $lock_acquired ) {
+				return false;
+			}
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			if ( false === $wpdb->query( 'START TRANSACTION' ) ) {
+				$wpdb->query( "SELECT RELEASE_LOCK('tptn_aggregation')" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				return new \WP_Error( 'tptn_transaction_failed', $wpdb->last_error ? $wpdb->last_error : __( 'Could not start transaction.', 'top-10' ) );
+			}
 		}
 
 		try {
 			// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 			$max_id = (int) $wpdb->get_var( "SELECT MAX(id) FROM {$funnel_table}" );
 			if ( 0 === $max_id ) {
-				$wpdb->query( 'ROLLBACK' ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
-				return false;
+				if ( ! $is_sqlite ) {
+					$wpdb->query( 'ROLLBACK' ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				}
+				return 0;
 			}
 
 			$cap_id     = $wpdb->get_var( $wpdb->prepare( "SELECT id FROM {$funnel_table} ORDER BY id ASC LIMIT %d, 1", $batch_size ) );
@@ -766,58 +776,62 @@ class Database {
 				)
 			);
 			if ( false === $r ) {
-				$wpdb->query( 'ROLLBACK' );
-				return false;
+				if ( ! $is_sqlite ) {
+					$wpdb->query( 'ROLLBACK' );
+				}
+				return new \WP_Error( 'tptn_log_insert_failed', $wpdb->last_error ? $wpdb->last_error : __( 'Failed to copy visits to log table.', 'top-10' ) );
 			}
 
 			$r = $wpdb->query(
 				$wpdb->prepare(
 					"INSERT INTO {$daily_table} (postnumber, cntaccess, dp_date, blog_id)
-					 SELECT * FROM (
-					     SELECT postnumber, COUNT(*) AS cntaccess,
-					            DATE_FORMAT(visited_at, '%%Y-%%m-%%d %%H:00:00') AS dp_date, blog_id
-					     FROM   {$funnel_table}
-					     WHERE  id <= %d AND activate_counter IN (10, 11)
-					     GROUP  BY postnumber, DATE_FORMAT(visited_at, '%%Y-%%m-%%d %%H:00:00'), blog_id
-					 ) AS new_row
-					 ON DUPLICATE KEY UPDATE cntaccess = {$daily_table}.cntaccess + new_row.cntaccess",
+					 SELECT postnumber, COUNT(*) AS cntaccess,
+					        DATE_FORMAT(visited_at, '%%Y-%%m-%%d %%H:00:00') AS dp_date, blog_id
+					 FROM   {$funnel_table}
+					 WHERE  id <= %d AND activate_counter IN (10, 11)
+					 GROUP  BY postnumber, DATE_FORMAT(visited_at, '%%Y-%%m-%%d %%H:00:00'), blog_id
+					 ON DUPLICATE KEY UPDATE cntaccess = {$daily_table}.cntaccess + VALUES(cntaccess)",
 					$max_id
 				)
 			);
 			if ( false === $r ) {
-				$wpdb->query( 'ROLLBACK' );
-				return false;
+				if ( ! $is_sqlite ) {
+					$wpdb->query( 'ROLLBACK' );
+				}
+				return new \WP_Error( 'tptn_daily_insert_failed', $wpdb->last_error ? $wpdb->last_error : __( 'Failed to aggregate visits into daily table.', 'top-10' ) );
 			}
 
 			$r = $wpdb->query(
 				$wpdb->prepare(
 					"INSERT INTO {$full_table} (postnumber, cntaccess, blog_id)
-					 SELECT * FROM (
-					     SELECT postnumber, COUNT(*) AS cntaccess, blog_id
-					     FROM   {$funnel_table}
-					     WHERE  id <= %d AND activate_counter IN (1, 11)
-					     GROUP  BY postnumber, blog_id
-					 ) AS new_row
-					 ON DUPLICATE KEY UPDATE cntaccess = {$full_table}.cntaccess + new_row.cntaccess",
+					 SELECT postnumber, COUNT(*) AS cntaccess, blog_id
+					 FROM   {$funnel_table}
+					 WHERE  id <= %d AND activate_counter IN (1, 11)
+					 GROUP  BY postnumber, blog_id
+					 ON DUPLICATE KEY UPDATE cntaccess = {$full_table}.cntaccess + VALUES(cntaccess)",
 					$max_id
 				)
 			);
 			if ( false === $r ) {
-				$wpdb->query( 'ROLLBACK' );
-				return false;
+				if ( ! $is_sqlite ) {
+					$wpdb->query( 'ROLLBACK' );
+				}
+				return new \WP_Error( 'tptn_overall_insert_failed', $wpdb->last_error ? $wpdb->last_error : __( 'Failed to aggregate visits into overall table.', 'top-10' ) );
 			}
 
 			$r = $wpdb->query( $wpdb->prepare( "DELETE FROM {$funnel_table} WHERE id <= %d", $max_id ) );
 			if ( false === $r ) {
-				$wpdb->query( 'ROLLBACK' );
-				return false;
+				if ( ! $is_sqlite ) {
+					$wpdb->query( 'ROLLBACK' );
+				}
+				return new \WP_Error( 'tptn_funnel_delete_failed', $wpdb->last_error ? $wpdb->last_error : __( 'Failed to drain funnel table.', 'top-10' ) );
 			}
 			// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
-			if ( false === $wpdb->query( 'COMMIT' ) ) {
+			if ( ! $is_sqlite && false === $wpdb->query( 'COMMIT' ) ) {
 				$wpdb->query( 'ROLLBACK' ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
-				return false;
+				return new \WP_Error( 'tptn_commit_failed', $wpdb->last_error ? $wpdb->last_error : __( 'Transaction commit failed.', 'top-10' ) );
 			}
 
 			do_action( 'tptn_count_updated', 0, 0, false );
@@ -828,7 +842,9 @@ class Database {
 
 			return true;
 		} finally {
-			$wpdb->query( "SELECT RELEASE_LOCK('tptn_aggregation')" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			if ( ! $is_sqlite ) {
+				$wpdb->query( "SELECT RELEASE_LOCK('tptn_aggregation')" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			}
 		}
 	}
 
@@ -936,6 +952,102 @@ class Database {
 			array( 'postnumber', 'cntaccess', 'dp_date', 'blog_id' ),
 			array( 'postnumber', 'dp_date', 'blog_id' )
 		);
+	}
+
+	/**
+	 * Recreate visits funnel table.
+	 *
+	 * @since 4.3.0
+	 *
+	 * @param bool $backup Whether to create a permanent backup table before recreating.
+	 *
+	 * @return bool|\WP_Error True if recreated, error message if failed.
+	 */
+	public static function recreate_funnel_table( $backup = true ) {
+		global $wpdb;
+
+		$table_name        = self::get_funnel_table();
+		$backup_table_name = $backup ? $table_name . '_backup' : $table_name . '_temp';
+		$fields_sql        = 'postnumber, blog_id, visited_at, activate_counter, source';
+		$success           = false;
+
+		if ( $backup ) {
+			$success = $wpdb->query( "CREATE TABLE $backup_table_name LIKE $table_name" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			if ( false === $success ) {
+				/* translators: 1: Site number, 2: Error message */
+				return new \WP_Error( 'tptn_database_backup_failed', sprintf( esc_html__( 'Database backup failed on site %1$s. Error message: %2$s', 'top-10' ), get_site_url(), $wpdb->last_error ) );
+			}
+			$wpdb->query( "INSERT INTO $backup_table_name SELECT * FROM $table_name" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		} else {
+			$wpdb->query( "DROP TEMPORARY TABLE IF EXISTS $backup_table_name" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$success = $wpdb->query( "CREATE TEMPORARY TABLE $backup_table_name AS SELECT $fields_sql FROM $table_name" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		}
+
+		if ( false !== $success ) {
+			$wpdb->query( "DROP TABLE IF EXISTS $table_name" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$wpdb->query( self::create_funnel_table_sql() ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared
+
+			$success = $wpdb->query( "INSERT INTO $table_name ($fields_sql) SELECT $fields_sql FROM $backup_table_name" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+			if ( false === $success ) {
+				/* translators: 1: Site number, 2: Error message */
+				return new \WP_Error( 'tptn_database_insert_failed', sprintf( esc_html__( 'Database insert failed on site %1$s. Error message: %2$s', 'top-10' ), get_site_url(), $wpdb->last_error ) );
+			}
+		}
+
+		if ( ! $backup ) {
+			$wpdb->query( "DROP TEMPORARY TABLE IF EXISTS $backup_table_name" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		}
+
+		return $success;
+	}
+
+	/**
+	 * Recreate visits log table.
+	 *
+	 * @since 4.3.0
+	 *
+	 * @param bool $backup Whether to create a permanent backup table before recreating.
+	 *
+	 * @return bool|\WP_Error True if recreated, error message if failed.
+	 */
+	public static function recreate_log_table( $backup = true ) {
+		global $wpdb;
+
+		$table_name        = self::get_log_table();
+		$backup_table_name = $backup ? $table_name . '_backup' : $table_name . '_temp';
+		$fields_sql        = 'postnumber, blog_id, visited_at, source';
+		$success           = false;
+
+		if ( $backup ) {
+			$success = $wpdb->query( "CREATE TABLE $backup_table_name LIKE $table_name" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			if ( false === $success ) {
+				/* translators: 1: Site number, 2: Error message */
+				return new \WP_Error( 'tptn_database_backup_failed', sprintf( esc_html__( 'Database backup failed on site %1$s. Error message: %2$s', 'top-10' ), get_site_url(), $wpdb->last_error ) );
+			}
+			$wpdb->query( "INSERT INTO $backup_table_name SELECT * FROM $table_name" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		} else {
+			$wpdb->query( "DROP TEMPORARY TABLE IF EXISTS $backup_table_name" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$success = $wpdb->query( "CREATE TEMPORARY TABLE $backup_table_name AS SELECT $fields_sql FROM $table_name" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		}
+
+		if ( false !== $success ) {
+			$wpdb->query( "DROP TABLE IF EXISTS $table_name" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$wpdb->query( self::create_log_table_sql() ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared
+
+			$success = $wpdb->query( "INSERT INTO $table_name ($fields_sql) SELECT $fields_sql FROM $backup_table_name" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+			if ( false === $success ) {
+				/* translators: 1: Site number, 2: Error message */
+				return new \WP_Error( 'tptn_database_insert_failed', sprintf( esc_html__( 'Database insert failed on site %1$s. Error message: %2$s', 'top-10' ), get_site_url(), $wpdb->last_error ) );
+			}
+		}
+
+		if ( ! $backup ) {
+			$wpdb->query( "DROP TEMPORARY TABLE IF EXISTS $backup_table_name" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		}
+
+		return $success;
 	}
 
 	/**

@@ -57,14 +57,14 @@ if ( ! function_exists( __NAMESPACE__ . '\\tptn_freemius' ) ) {
 	 * @return string
 	 */
 	function tptn_freemius_get_plugin_icon() {
-		return __DIR__ . '/admin/images/tptn-icon.png';
+		return __DIR__ . '/includes/admin/images/tptn-icon.png';
 	}
 
 	/**
 	 * Uninstall the plugin.
 	 */
 	function tptn_freemius_uninstall() {
-		require_once dirname( __DIR__ ) . '/uninstaller.php';
+		require_once __DIR__ . '/uninstaller.php';
 	}
 
 	// Init Freemius.
