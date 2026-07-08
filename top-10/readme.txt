@@ -2,7 +2,7 @@
 Tags: popular posts, post views, page views, most viewed posts, popular posts widget, trending posts, post views counter, multisite, block, shortcode
 Contributors: webberzone, ajay
 Donate link: https://wzn.io/donate-wz
-Stable tag: 4.3.1
+Stable tag: 4.3.2
 Requires at least: 6.6
 Tested up to: 7.0
 Requires PHP: 7.4
@@ -171,6 +171,14 @@ The Patchstack team help validate, triage and handle any security vulnerabilitie
 [Report a security vulnerability.](https://patchstack.com/database/vdp/top-10)
 
 == Changelog ==
+
+= 4.3.2 =
+
+*Release Date - 8 July 2026*
+
+* Improvements:
+	* Dynamic post counts now load more reliably and are faster in modern browsers.
+	* Enhanced time range labeling: Interface now dynamically shows "Daily" for 1-day periods or "Custom (N days)" for longer periods, making the UI more accurate based on actual settings.
 
 = 4.3.1 =
 
