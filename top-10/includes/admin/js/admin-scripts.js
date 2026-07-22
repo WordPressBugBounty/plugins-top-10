@@ -34,110 +34,98 @@ jQuery(document).ready(function ($) {
 	 * Handle style changes and enforce valid thumbnail location settings.
 	 */
 	function tptnHandleThumbnailStyleChange() {
-		var $styleSelect = $('select[name="tptn_settings[tptn_styles]"]');
-		if (!$styleSelect.length) {
-			return;
-		}
-
-		var $postThumbOptions = $('input[name="tptn_settings[post_thumb_op]"]');
-		if (!$postThumbOptions.length) {
+		var styleSelect = document.querySelector('select[name="tptn_settings[tptn_styles]"]');
+		if (!styleSelect) {
 			return;
 		}
 
 		var strings = top_ten_admin_data.strings || {};
-		var styleRules = {
-			'left_thumbs': {
-				allowed: ['inline', 'thumbs_only'],
-				fallback: 'inline',
-				message: strings.left_thumbs_message
-			},
-			'grid_thumbs': {
-				allowed: ['inline', 'thumbs_only'],
-				fallback: 'inline',
-				message: strings.grid_thumbs_message || strings.left_thumbs_message
-			},
-			'text_only': {
-				force: 'text_only',
-				disableAll: true,
-				message: strings.text_only_message
-			}
+
+		var messageConfig = {
+			'left_thumbs': 'left_thumbs_message',
+			'grid_thumbs': 'grid_thumbs_message',
+			'text_only': 'text_only_message'
 		};
 
-		function removeMessage() {
-			var $container = $postThumbOptions.first().closest('td');
-			if (!$container.length) {
-				$container = $postThumbOptions.first().parent();
+		function updateMessage(selectedStyle) {
+			var messageKey = messageConfig[selectedStyle];
+			var postThumbOptions = document.querySelectorAll('input[name="tptn_settings[post_thumb_op]"]');
+			if (postThumbOptions.length === 0) {
+				return;
 			}
-			$container.find('.tptn-js-message').remove();
+
+			var container = postThumbOptions[0].closest('td');
+			if (!container) {
+				return;
+			}
+
+			var existingMessage = container.querySelector('.tptn-js-message');
+			if (!messageKey) {
+				if (existingMessage) {
+					existingMessage.remove();
+				}
+				return;
+			}
+
+			var messageText = strings[messageKey] || '';
+			if (!existingMessage) {
+				var message = document.createElement('p');
+				message.className = 'description tptn-js-message';
+				message.style.color = '#9B0800';
+				message.textContent = messageText;
+				container.appendChild(message);
+			} else if (existingMessage.textContent !== messageText) {
+				existingMessage.textContent = messageText;
+			}
 		}
 
-		function addMessage(message) {
-			if (!message) {
-				return;
-			}
+		function updateFields() {
+			var selectedStyle = styleSelect.value;
+			var postThumbOptions = document.querySelectorAll('input[name="tptn_settings[post_thumb_op]"]');
 
-			var $container = $postThumbOptions.first().closest('td');
-			if (!$container.length) {
-				$container = $postThumbOptions.first().parent();
-			}
+			// Update the inline message first.
+			updateMessage(selectedStyle);
 
-			var $existingMessage = $container.find('.tptn-js-message');
-			if ($existingMessage.length) {
-				$existingMessage.text(message);
-				return;
-			}
+			// Reset all radios to enabled, then re-disable as needed.
+			postThumbOptions.forEach(function (el) {
+				el.disabled = false;
+			});
 
-			$container.append(
-				$('<p />', {
-					'class': 'description tptn-js-message',
-					'css': { 'color': '#9B0800' },
-					'text': message
-				})
-			);
-		}
+			// Special handling for left/grid thumbs: restrict post_thumb_op to inline, after, or thumbs_only.
+			if ('left_thumbs' === selectedStyle || 'grid_thumbs' === selectedStyle) {
+				var allowed = ['inline', 'after', 'thumbs_only'];
+				var currentChecked = document.querySelector('input[name="tptn_settings[post_thumb_op]"]:checked');
+				var needsFallback = !currentChecked || -1 === allowed.indexOf(currentChecked.value);
 
-		function updateFieldStates() {
-			var selectedStyle = $styleSelect.val();
-			var $checked = $postThumbOptions.filter(':checked');
-			var rule = styleRules[selectedStyle] || null;
-
-			removeMessage();
-			$postThumbOptions.prop('disabled', false);
-
-			if (!rule) {
-				return;
-			}
-
-			if (rule.disableAll) {
-				$postThumbOptions.prop('disabled', true);
-			}
-
-			if (rule.allowed && rule.allowed.length) {
-				$postThumbOptions.each(function () {
-					var $option = $(this);
-					var value = $option.val();
-					if (-1 === rule.allowed.indexOf(value)) {
-						$option.prop('disabled', true);
+				postThumbOptions.forEach(function (el) {
+					if (-1 === allowed.indexOf(el.value)) {
+						el.disabled = true;
 					}
 				});
 
-				if (!$checked.length || -1 === rule.allowed.indexOf($checked.val())) {
-					var fallback = rule.fallback || rule.allowed[0];
-					$postThumbOptions.filter('[value="' + fallback + '"]').prop('checked', true);
+				if (needsFallback) {
+					var inlineRadio = document.querySelector('input[name="tptn_settings[post_thumb_op]"][value="inline"]');
+					if (inlineRadio) {
+						inlineRadio.checked = true;
+					}
 				}
 			}
 
-			if (rule.force) {
-				$postThumbOptions.filter('[value="' + rule.force + '"]').prop('checked', true);
-			}
+			// Special handling for text_only: force post_thumb_op to text_only.
+			if ('text_only' === selectedStyle) {
+				postThumbOptions.forEach(function (el) {
+					el.disabled = true;
+				});
 
-			if (rule.message) {
-				addMessage(rule.message);
+				var textOnlyRadio = document.querySelector('input[name="tptn_settings[post_thumb_op]"][value="text_only"]');
+				if (textOnlyRadio) {
+					textOnlyRadio.checked = true;
+				}
 			}
 		}
 
-		updateFieldStates();
-		$styleSelect.on('change', updateFieldStates);
+		updateFields();
+		styleSelect.addEventListener('change', updateFields);
 	}
 
 	tptnHandleThumbnailStyleChange();

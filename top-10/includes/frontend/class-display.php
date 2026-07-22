@@ -99,6 +99,23 @@ class Display {
 			return '';
 		}
 
+		/**
+		 * Pre-filter the popular posts output.
+		 *
+		 * Return a non-null value to short-circuit the default rendering, e.g. to
+		 * replace it with a lazy load placeholder. Runs for all display methods.
+		 *
+		 * @since 4.4.0
+		 *
+		 * @param string|null   $pre  Pre-rendered output. Default null.
+		 * @param array         $args Fully parsed arguments array.
+		 * @param \WP_Post|null $post Current post object.
+		 */
+		$pre = apply_filters( 'tptn_pre_pop_posts', null, $args, $post );
+		if ( null !== $pre ) {
+			return (string) $pre;
+		}
+
 		// Check if the cache is enabled and if the output exists. If so, return the output.
 		if ( $args['cache'] ) {
 			$cache_name = \WebberZone\Top_Ten\Util\Cache::get_key( $args );
@@ -191,6 +208,10 @@ class Display {
 				if ( $args['disp_list_count'] ) {
 
 					$output .= ' <span class="tptn_list_count">' . self::get_list_count( $args, $result, $visits ) . '</span>';
+				}
+
+				if ( ! empty( $args['show_ratings'] ) ) {
+					$output .= self::get_the_ratings( $args, $result );
 				}
 
 				$tptn_list = '';
@@ -880,7 +901,9 @@ class Display {
 	 */
 	public static function get_list_count( $args, $result, $visits ) {
 
-		$tptn_list_count = '(' . Helpers::number_format_i18n( $visits ) . ')';
+		$number_format_style = isset( $args['number_format_style'] ) ? $args['number_format_style'] : null;
+
+		$tptn_list_count = '(' . Helpers::number_format_i18n( $visits, 0, $number_format_style ) . ')';
 
 		/**
 		 * Filter the formatted list count text.
@@ -893,6 +916,38 @@ class Display {
 		 * @param   array   $args             Array of arguments.
 		 */
 		return apply_filters( 'tptn_list_count', $tptn_list_count, $visits, $result, $args );
+	}
+
+
+	/**
+	 * Returns the WP-PostRatings rating of each list item.
+	 *
+	 * @since 4.4.0
+	 *
+	 * @param   array    $args   Array of arguments. `show_ratings` can be `stars` (WP-PostRatings template) or `score` (average rating number).
+	 * @param   \WP_Post $result Object of the current post result.
+	 * @return  string Formatted rating markup. Empty string if WP-PostRatings is not active.
+	 */
+	public static function get_the_ratings( $args, $result ) {
+
+		$ratings = '';
+
+		if ( 'score' === $args['show_ratings'] && function_exists( 'expand_ratings_template' ) ) {
+			$ratings = ' <span class="tptn_ratings">' . expand_ratings_template( '%RATINGS_AVERAGE%', $result->ID ) . '</span>';
+		} elseif ( function_exists( 'the_ratings_results' ) ) {
+			$ratings = ' <span class="tptn_ratings">' . the_ratings_results( $result->ID ) . '</span>';
+		}
+
+		/**
+		 * Filter the WP-PostRatings rating markup of each list item.
+		 *
+		 * @since 4.4.0
+		 *
+		 * @param   string   $ratings Formatted rating markup. Empty string if WP-PostRatings is not active.
+		 * @param   \WP_Post $result  Object of the current post result.
+		 * @param   array    $args    Array of arguments.
+		 */
+		return apply_filters( 'tptn_ratings', $ratings, $result, $args );
 	}
 
 

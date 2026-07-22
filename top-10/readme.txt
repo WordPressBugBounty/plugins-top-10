@@ -2,7 +2,7 @@
 Tags: popular posts, post views, page views, most viewed posts, popular posts widget, trending posts, post views counter, multisite, block, shortcode
 Contributors: webberzone, ajay
 Donate link: https://wzn.io/donate-wz
-Stable tag: 4.3.4
+Stable tag: 4.4.0
 Requires at least: 6.6
 Tested up to: 7.0
 Requires PHP: 7.4
@@ -45,6 +45,7 @@ Top 10 also exposes a powerful API with WordPress actions and filters, allowing 
   * __Fast and High-Traffic Trackers__: Alternative tracking methods for improved performance on busy sites
   * __Query Optimisation__: MySQL `MAX_EXECUTION_TIME` directive to prevent long-running queries, configurable via settings and the `top_ten_query_max_execution_time` filter
   * __Data Retention Override__: Customizable data retention period (default 180 days via `TOP_TEN_STORE_DATA`)
+  * __Lazy Loading__: Render popular posts lists via JavaScript only when they are about to scroll into view, so full-page caching plugins can serve a page without baking in a live popular-posts query. Works with content, shortcodes, widgets, and the Popular Posts block; disable per instance with the `lazy_load` shortcode/block attribute
 
 * __Advanced Blocks and Widgets__
   * __Top 10 Query Block__: Query and display popular posts directly from the block or site editor
@@ -172,16 +173,34 @@ The Patchstack team help validate, triage and handle any security vulnerabilitie
 
 == Changelog ==
 
-= 4.3.4 =
+= 4.4.0 =
 
-*Release Date - TBD*
+*Release Date - 22 July 2026*
 
 * Features:
+	* New "Features" tab under Settings: turn off plugin features that you do not use and their code will not be loaded at all. You can toggle the Popular Posts and Post Count blocks, popular posts feeds, legacy widgets, Query block, Featured Image block, Popular Posts Pro block, Fast and High-traffic trackers, Pro dashboard widgets, and Popular Authors.
 	* New "Tracking method" setting under Settings » Counter/Tracker » Tracker settings: choose between Funnel tracking (default; views are buffered and merged into the count tables every few minutes) and Legacy tracking (views are written directly to the count tables on every visit, as in versions before 4.3). Switch to Legacy tracking if view counts are not updating on your site, e.g. when WP-Cron is disabled or unreliable. Note that Legacy tracking does not populate the visits log table. The Fast and High-traffic trackers respect this setting; regenerate the High-traffic config file after changing it.
+	* New "Number format style" setting under Settings » Counter/Tracker » Counter settings: choose Abbreviated to display large view counts in a compact form, e.g. 1.2k or 3.4M, wherever counts are displayed. The default remains the full locale-formatted number. It can be overridden per instance with the `number_format_style` shortcode/block attribute, and the suffixes and rounding can be customised via the `tptn_number_format_abbreviations` and `tptn_abbreviate_number_decimals` filters.
+	* WP-PostRatings integration: new "Show WP-PostRatings rating" setting under Settings » Posts list displays each post's rating next to it in the popular posts list, either as the star rating rendered using the WP-PostRatings plugin's own templates or as the average score number. Off by default and only takes effect when the free WP-PostRatings plugin is active. It can be overridden per instance with the `show_ratings` shortcode/block attribute (`stars` or `score`), and the markup can be customised via the `tptn_ratings` filter.
+	* [Pro] New "Lazy load popular posts" setting under Settings » General: load popular posts lists via JavaScript only when they are about to enter the viewport instead of rendering them inline, so full-page caching plugins can serve a page without embedding a live popular-posts query. Applies to content, shortcodes, widgets, and the Popular Posts block. Off by default. Override it per instance with the `lazy_load` shortcode/block attribute, e.g. `lazy_load="0"`. Not applied on feeds, admin, AJAX, cron, WP-CLI, or AMP pages.
+
+* Improvements:
+	* The `[tptn_list]` shortcode now accepts all registered settings as attributes, including newly added settings that are not yet present in the saved settings.
+	* Redesigned settings page with vertical tab navigation, which is responsive and reverts to horizontal tabs on smaller screens. The settings page now opens on the Features tab.
+	* New search box above the settings tabs: type to instantly filter settings across all tabs. Matching settings are shown grouped by tab with the search term highlighted in their labels and descriptions, each tab displays a count of its matches, and clicking a tab scrolls to its results. You can also search by the internal setting key, e.g. `cache_time`. A single Save Changes bar replaces the per-tab buttons while searching, and the search is fully keyboard and screen reader accessible.
+	* Checkbox settings now display as toggle switches.
+	* Settings that have been changed from their default value are marked with an indicator dot, with a legend below the buttons. The default value is also displayed below each setting's description.
+	* Admin styles and scripts are now versioned with the plugin version so browsers reliably pick up changes after an update.
+	* Bot/crawler detection (used by the "Do not track bots" tracker setting) now uses the actively maintained Crawler-Detect library for broader, more accurate coverage, alongside the existing built-in pattern list.
 
 * Fixed:
+	* Admin banner no longer causes a horizontal scrollbar on the plugin's admin pages.
 	* Custom period label ("Daily" vs "Custom (N days)") on the Dashboard widget, Popular Posts submenu, and post list Views column now matches the data actually shown, instead of always following the site-wide Custom period setting.
 	* Post list Views column, and its sort order, now counts today only instead of the full Custom period range.
+	* Left thumbnail style no longer stacks the thumbnail above the text in narrow containers such as sidebar widgets; it now stays side by side unless there genuinely isn't room.
+	* New "Fix Cron Schedules" tool under Top 10 » Tools to clear and reschedule the maintenance and aggregation cron jobs if they stop running.
+	* The Tools page and an admin notice now surface WP-Cron scheduling errors (e.g. "The cron event list could not be saved") directly in the dashboard instead of only appearing in the PHP error log.
+	* [Pro] Fast and High-traffic trackers now respect the "Do not track bots" setting; previously they recorded views for bots and other automated user agents regardless of this setting.
 
 = 4.3.2 =
 

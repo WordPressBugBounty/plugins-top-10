@@ -14,7 +14,7 @@
  * Plugin Name: WebberZone Top 10
  * Plugin URI:  https://webberzone.com/plugins/top-10/
  * Description: Count daily and total visits per post and display the most popular posts based on the number of views
- * Version:     4.3.4
+ * Version:     4.4.0
  * Author:      WebberZone
  * Author URI:  https://webberzone.com
  * License:     GPL-2.0+
@@ -36,7 +36,7 @@ if ( ! defined( 'WPINC' ) ) {
  * @since 3.1.0
  */
 if ( ! defined( 'TOP_TEN_VERSION' ) ) {
-	define( 'TOP_TEN_VERSION', '4.3.4' );
+	define( 'TOP_TEN_VERSION', '4.4.0' );
 }
 
 /**
@@ -175,6 +175,17 @@ if ( ! function_exists( __NAMESPACE__ . '\\tptn_freemius' ) ) {
 if ( ! function_exists( __NAMESPACE__ . '\\autoload' ) ) {
 	require_once plugin_dir_path( __FILE__ ) . 'includes/autoloader.php';
 }
+
+// Load the CrawlerDetect library (bundled directly; not via the Composer autoloader).
+$tptn_crawler_detect_src = plugin_dir_path( __FILE__ ) . 'vendor/jaybizzle/crawler-detect/src/';
+if ( ! class_exists( '\Jaybizzle\CrawlerDetect\CrawlerDetect' ) && is_dir( $tptn_crawler_detect_src ) ) {
+	require_once $tptn_crawler_detect_src . 'Fixtures/AbstractProvider.php';
+	require_once $tptn_crawler_detect_src . 'Fixtures/Crawlers.php';
+	require_once $tptn_crawler_detect_src . 'Fixtures/Exclusions.php';
+	require_once $tptn_crawler_detect_src . 'Fixtures/Headers.php';
+	require_once $tptn_crawler_detect_src . 'CrawlerDetect.php';
+}
+unset( $tptn_crawler_detect_src );
 
 
 if ( ! function_exists( __NAMESPACE__ . '\wz_top_ten' ) ) {

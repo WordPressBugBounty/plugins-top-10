@@ -16,6 +16,8 @@ if ( ! defined( 'WPINC' ) ) {
 
 /**
  * Settings Sanitize Class.
+ *
+ * @since 4.0.0
  */
 class Settings_Sanitize {
 
@@ -195,6 +197,16 @@ class Settings_Sanitize {
 		$value = in_array( (int) $value, array( 0, -1 ), true ) ? 0 : 1;
 
 		return $value;
+	}
+
+	/**
+	 * Sanitize toggle fields
+	 *
+	 * @param mixed $value The field value.
+	 * @return int  Sanitized value
+	 */
+	public function sanitize_toggle_field( $value ) {
+		return $this->sanitize_checkbox_field( $value );
 	}
 
 	/**
