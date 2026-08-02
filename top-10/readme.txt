@@ -2,7 +2,7 @@
 Tags: popular posts, post views, page views, most viewed posts, popular posts widget, trending posts, post views counter, multisite, block, shortcode
 Contributors: webberzone, ajay
 Donate link: https://wzn.io/donate-wz
-Stable tag: 4.4.1
+Stable tag: 4.4.2
 Requires at least: 6.6
 Tested up to: 7.0
 Requires PHP: 7.4
@@ -173,6 +173,15 @@ The Patchstack team help validate, triage and handle any security vulnerabilitie
 
 == Changelog ==
 
+= 4.4.2 =
+
+*Release Date - 2 August 2026*
+
+* Fixed:
+	* Fatal errors on servers with `open_basedir` restrictions when the plugin directory uses a symlink.
+	* False-positive WP-Cron rescheduling notices when the cron event remains correctly scheduled.
+	* Restored the previous database error display state after table creation and primary-key operations.
+
 = 4.4.1 =
 
 *Release Date - 25 July 2026*
@@ -328,5 +337,5 @@ Release post: [https://webberzone.com/announcements/top-10-v4-2-0/](https://webb
 
 == Upgrade Notice ==
 
-= 4.4.1 =
-Fixes the "Exclude Front page and Posts page" setting having no effect, and a settings page sidebar/tab overlap. No action required.
+= 4.4.2 =
+Fixes a fatal error on servers with `open_basedir` restrictions where no plugin class could be loaded. No action required.
