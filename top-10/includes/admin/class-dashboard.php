@@ -40,6 +40,7 @@ class Dashboard {
 		add_action( 'network_admin_menu', array( $this, 'network_admin_menu' ), 9 );
 		add_action( 'admin_enqueue_scripts', array( $this, 'admin_enqueue_scripts' ) );
 		add_action( 'wp_ajax_tptn_chart_data', array( $this, 'get_chart_data' ) );
+		add_action( 'wp_ajax_tptn_dashboard_tab', array( $this, 'get_dashboard_tab' ) );
 	}
 
 	/**
@@ -57,11 +58,26 @@ class Dashboard {
 		$post_date_from = ( isset( $_REQUEST['post-date-filter-from'] ) && check_admin_referer( 'tptn-dashboard' ) ) ? sanitize_text_field( wp_unslash( $_REQUEST['post-date-filter-from'] ) ) : $chart_from_date;
 
 		$post_date_to = ( isset( $_REQUEST['post-date-filter-to'] ) && check_admin_referer( 'tptn-dashboard' ) ) ? sanitize_text_field( wp_unslash( $_REQUEST['post-date-filter-to'] ) ) : $chart_to_date;
+		$tabs         = $this->get_tabs();
+		$initial_tab  = '';
+		foreach ( $tabs as $tab_id => $tab ) {
+			if ( empty( $tab['hide'] ) ) {
+				$initial_tab = $tab_id;
+				break;
+			}
+		}
 
 		?>
 		<div class="wrap">
 			<h1><?php esc_html_e( 'Top 10 Dashboard', 'top-10' ); ?></h1>
-			<?php do_action( 'tptn_settings_page_header' ); ?>
+			<?php
+			/**
+			 * Fires at the top of a Top 10 admin page, after the heading.
+			 *
+			 * @since 4.0.0
+			 */
+			do_action( 'tptn_settings_page_header' );
+			?>
 
 			<?php settings_errors(); ?>
 
@@ -94,10 +110,10 @@ class Dashboard {
 				</form>
 
 				<h2><?php esc_html_e( 'Historical visits', 'top-10' ); ?></h2>
-				<div id="dashboard-historical-visits">
+				<div id="dashboard-historical-visits" data-tptn-network="<?php echo esc_attr( is_network_admin() ? '1' : '0' ); ?>">
 					<ul class="nav-tab-wrapper" style="padding:0; border-bottom: 1px solid #ccc;">
 						<?php
-						foreach ( $this->get_tabs() as $tab_id => $tab_name ) {
+						foreach ( $tabs as $tab_id => $tab_name ) {
 							$tab_class = 'nav-tab';
 							$tab_style = '';
 
@@ -121,13 +137,21 @@ class Dashboard {
 
 					<form method="post" action="options.php">
 
-						<?php foreach ( $this->get_tabs() as $tab_id => $tab_name ) : ?>
+						<?php foreach ( $tabs as $tab_id => $tab_name ) : ?>
 
-						<div id="<?php echo esc_attr( $tab_id ); ?>">
+						<div id="<?php echo esc_attr( $tab_id ); ?>" data-tptn-tab="<?php echo esc_attr( $tab_id ); ?>" data-tptn-loaded="<?php echo esc_attr( $tab_id === $initial_tab ? '1' : '0' ); ?>">
+							<div class="tptn-dashboard-tab-content">
 							<?php
-								$output = empty( $tab_name['hide'] ) ? $this->display_popular_posts( $tab_name ) : '';
+								$output = '';
+							if ( empty( $tab_name['hide'] ) && $tab_id === $initial_tab ) {
+								$tab_name['network'] = is_network_admin();
+								$output              = $this->display_popular_posts( $tab_name );
+							} elseif ( empty( $tab_name['hide'] ) ) {
+								$output = '<p class="tptn-dashboard-tab-loading" aria-live="polite">' . esc_html__( 'Loading…', 'top-10' ) . '</p>';
+							}
 								echo $output; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
 							?>
+							</div>
 
 							<div style="font-weight:bold;padding:5px;">
 
@@ -274,6 +298,8 @@ class Dashboard {
 					'enableBarClick' => $enable_bar_click ? 1 : 0,
 					'statsUrl'       => $stats_base_url,
 					'clickBarHint'   => __( 'Click to view top posts for this day', 'top-10' ),
+					'tabs_url'       => admin_url( 'admin-ajax.php' ),
+					'tab_error'      => __( 'Unable to load this tab. Please refresh the page and try again.', 'top-10' ),
 				)
 			);
 			wp_enqueue_style( 'top-ten-admin-css' );
@@ -293,17 +319,19 @@ class Dashboard {
 	public static function fetch_visits_by_date( $from_date, $to_date, $network = false ) {
 		global $wpdb;
 
+		$date_range = self::get_datetime_range( $from_date, $to_date );
+
 		if ( $network ) {
 			$sql = $wpdb->prepare(
 				" SELECT SUM(cntaccess) AS visits, DATE(dp_date) as date
 				FROM {$wpdb->base_prefix}top_ten_daily
-				WHERE DATE(dp_date) >= DATE(%s)
-				AND DATE(dp_date) <= DATE(%s)
+				WHERE dp_date >= %s
+				AND dp_date < %s
 				GROUP BY date
 				ORDER BY date ASC
 				",
-				$from_date,
-				$to_date
+				$date_range['from'],
+				$date_range['until']
 			);
 		} else {
 			$blog_id = get_current_blog_id();
@@ -311,14 +339,14 @@ class Dashboard {
 			$sql = $wpdb->prepare(
 				" SELECT SUM(cntaccess) AS visits, DATE(dp_date) as date
 				FROM {$wpdb->base_prefix}top_ten_daily
-				WHERE DATE(dp_date) >= DATE(%s)
-				AND DATE(dp_date) <= DATE(%s)
+				WHERE dp_date >= %s
+				AND dp_date < %s
 				AND blog_id = %d
 				GROUP BY date
 				ORDER BY date ASC
 				",
-				$from_date,
-				$to_date,
+				$date_range['from'],
+				$date_range['until'],
 				$blog_id
 			);
 		}
@@ -331,6 +359,22 @@ class Dashboard {
 		}
 
 		return $data;
+	}
+
+	/**
+	 * Convert inclusive calendar dates into a half-open datetime range.
+	 *
+	 * @since 4.5.0
+	 *
+	 * @param string $from_date Inclusive start date.
+	 * @param string $to_date   Inclusive end date.
+	 * @return array{from:string,until:string} Datetime boundaries.
+	 */
+	private static function get_datetime_range( $from_date, $to_date ) {
+		return array(
+			'from'  => gmdate( 'Y-m-d 00:00:00', strtotime( $from_date ) ),
+			'until' => gmdate( 'Y-m-d 00:00:00', strtotime( $to_date . ' +1 day' ) ),
+		);
 	}
 
 	/**
@@ -361,6 +405,38 @@ class Dashboard {
 		wp_die();
 	}
 
+	/**
+	 * Load one historical dashboard tab.
+	 *
+	 * @since 4.5.0
+	 */
+	public function get_dashboard_tab() {
+		$is_network = is_multisite() && isset( $_REQUEST['network'] ) && 1 === (int) $_REQUEST['network'];
+		$roles      = wp_parse_list( \tptn_get_option( 'show_dashboard_to_roles' ) );
+		$capability = $is_network ? 'manage_network_options' : Settings_API::get_capability_for_menu( $roles );
+
+		if ( ! current_user_can( $capability ) ) {
+			wp_send_json_error( array( 'message' => __( 'You are not allowed to view this data.', 'top-10' ) ), 403 );
+		}
+
+		check_ajax_referer( 'tptn-dashboard', 'security' );
+
+		$tab_id = isset( $_REQUEST['tab'] ) ? sanitize_key( $_REQUEST['tab'] ) : '';
+		$tabs   = $this->get_tabs();
+		if ( '' === $tab_id || ! isset( $tabs[ $tab_id ] ) || ! empty( $tabs[ $tab_id ]['hide'] ) ) {
+			wp_send_json_error( array( 'message' => __( 'The requested dashboard tab is not available.', 'top-10' ) ), 400 );
+		}
+
+		$args            = $tabs[ $tab_id ];
+		$args['network'] = $is_network;
+
+		wp_send_json_success(
+			array(
+				'html' => $this->display_popular_posts( $args ),
+			)
+		);
+	}
+
 
 	/**
 	 * Array containing the settings' sections.
@@ -383,17 +459,17 @@ class Dashboard {
 			),
 			'lastweek'      => array(
 				'title'     => __( 'Last 7 days', 'top-10' ),
-				'from_date' => gmdate( 'd M Y', strtotime( '-1 week' ) ),
+				'from_date' => gmdate( 'd M Y', strtotime( '-6 days' ) ),
 				'to_date'   => current_time( 'd M Y' ),
 			),
 			'lastfortnight' => array(
 				'title'     => __( 'Last 14 days', 'top-10' ),
-				'from_date' => gmdate( 'd M Y', strtotime( '-2 weeks' ) ),
+				'from_date' => gmdate( 'd M Y', strtotime( '-13 days' ) ),
 				'to_date'   => current_time( 'd M Y' ),
 			),
 			'lastmonth'     => array(
 				'title'     => __( 'Last 30 days', 'top-10' ),
-				'from_date' => gmdate( 'd M Y', strtotime( '-30 days' ) ),
+				'from_date' => gmdate( 'd M Y', strtotime( '-29 days' ) ),
 				'to_date'   => current_time( 'd M Y' ),
 			),
 			'overall'       => array(
@@ -461,21 +537,31 @@ class Dashboard {
 				<tbody>
 			<?php
 			foreach ( $results as $result ) :
-				$visits_int = (int) $result['visits'];
-				$visits     = \WebberZone\Top_Ten\Util\Helpers::number_format_i18n( $visits_int );
+				$visits_int  = (int) $result['visits'];
+				$visits      = \WebberZone\Top_Ten\Util\Helpers::number_format_i18n( $visits_int );
+				$context_key = class_exists( 'WebberZone\\Top_Ten\\Pro\\Sitewide_Database' ) && \WebberZone\Top_Ten\Pro\Sitewide_Database::is_available()
+					? \WebberZone\Top_Ten\Pro\Sitewide_Database::get_context_key( $result['ID'], $result['blog_id'] ?? null )
+					: '';
 				if ( $is_network && isset( $result['blog_id'] ) ) {
-					$post      = get_blog_post( (int) $result['blog_id'], (int) $result['ID'] );
-					$permalink = is_multisite() ? get_blog_permalink( (int) $result['blog_id'], (int) $result['ID'] ) : get_permalink( (int) $result['ID'] );
+					$post      = '' === $context_key ? get_blog_post( (int) $result['blog_id'], (int) $result['ID'] ) : null;
+					$permalink = '' === $context_key ? ( is_multisite() ? get_blog_permalink( (int) $result['blog_id'], (int) $result['ID'] ) : get_permalink( (int) $result['ID'] ) ) : '';
 				} else {
-					$post      = get_post( (int) $result['ID'] );
-					$permalink = get_permalink( (int) $result['ID'] );
+					$post      = '' === $context_key ? get_post( (int) $result['ID'] ) : null;
+					$permalink = '' === $context_key ? get_permalink( (int) $result['ID'] ) : '';
 				}
-				if ( ! $post ) {
+				if ( ! $post && '' === $context_key ) {
 					continue;
 				}
+				$title = '' !== $context_key ? \WebberZone\Top_Ten\Pro\Sitewide_Database::get_context_label( $context_key ) : get_the_title( $post );
 				?>
 				<tr>
-					<td><a href="<?php echo esc_url( $permalink ); ?>" target="_blank"><?php echo esc_html( get_the_title( $post ) ); ?></a></td>
+					<td>
+						<?php if ( '' !== $context_key ) : ?>
+							<?php echo esc_html( $title ); ?> <span class="tptn-sitewide-label">(<?php esc_html_e( 'site-wide', 'top-10' ); ?>)</span>
+						<?php else : ?>
+							<a href="<?php echo esc_url( $permalink ); ?>" target="_blank"><?php echo esc_html( $title ); ?></a>
+						<?php endif; ?>
+					</td>
 					<?php if ( $is_network && isset( $result['blog_id'] ) ) : ?>
 						<td>
 							<?php
@@ -550,26 +636,23 @@ class Dashboard {
 		$is_network       = ( null !== $explicit_network ) ? $explicit_network : ( is_multisite() && is_network_admin() );
 		$table_name       = Database::get_table( $args['daily'] );
 
-		$has_dates = ! empty( $args['from_date'] ) && ! empty( $args['to_date'] );
+		$has_dates  = ! empty( $args['from_date'] ) && ! empty( $args['to_date'] );
+		$date_range = $has_dates ? self::get_datetime_range( $args['from_date'], $args['to_date'] ) : array();
 
 		if ( $args['daily'] && $has_dates && $is_network ) {
-			$from_date = gmdate( 'Y-m-d', strtotime( $args['from_date'] ) );
-			$to_date   = gmdate( 'Y-m-d', strtotime( $args['to_date'] ) );
-			$sql       = $wpdb->prepare(
+			$sql = $wpdb->prepare(
 				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-				"SELECT SUM(cntaccess) FROM {$table_name} WHERE DATE(dp_date) >= DATE(%s) AND DATE(dp_date) <= DATE(%s)",
-				$from_date,
-				$to_date
+				"SELECT SUM(cntaccess) FROM {$table_name} WHERE dp_date >= %s AND dp_date < %s",
+				$date_range['from'],
+				$date_range['until']
 			);
 		} elseif ( $args['daily'] && $has_dates ) {
-			$blog_id   = (int) $args['blog_id'];
-			$from_date = gmdate( 'Y-m-d', strtotime( $args['from_date'] ) );
-			$to_date   = gmdate( 'Y-m-d', strtotime( $args['to_date'] ) );
-			$sql       = $wpdb->prepare(
+			$blog_id = (int) $args['blog_id'];
+			$sql     = $wpdb->prepare(
 				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-				"SELECT SUM(cntaccess) FROM {$table_name} WHERE DATE(dp_date) >= DATE(%s) AND DATE(dp_date) <= DATE(%s) AND blog_id = %d",
-				$from_date,
-				$to_date,
+				"SELECT SUM(cntaccess) FROM {$table_name} WHERE dp_date >= %s AND dp_date < %s AND blog_id = %d",
+				$date_range['from'],
+				$date_range['until'],
 				$blog_id
 			);
 		} elseif ( $is_network ) {
@@ -626,6 +709,11 @@ class Dashboard {
 		$explicit_network = isset( $args['network'] ) ? (bool) $args['network'] : null;
 		$is_network       = ( null !== $explicit_network ) ? $explicit_network : ( is_multisite() && is_network_admin() );
 		$table_name       = Database::get_table( $args['daily'] );
+		$date_range       = ( $args['daily'] && ! empty( $args['from_date'] ) && ! empty( $args['to_date'] ) )
+			? self::get_datetime_range( $args['from_date'], $args['to_date'] )
+			: array();
+		$sitewide_ids     = class_exists( 'WebberZone\\Top_Ten\\Pro\\Sitewide_Database' ) && \WebberZone\Top_Ten\Pro\Sitewide_Database::is_available() ? \WebberZone\Top_Ten\Pro\Sitewide_Database::get_context_ids() : array();
+		$sitewide_sql     = empty( $sitewide_ids ) ? '0=1' : $table_name . '.postnumber IN (' . implode( ',', array_map( 'intval', $sitewide_ids ) ) . ')';
 
 		if ( $is_network ) {
 			// Network-wide: aggregate across all blogs.
@@ -637,14 +725,8 @@ class Dashboard {
 
 			$where = ' 1=1 ';
 
-			if ( isset( $args['from_date'] ) && ! empty( $args['from_date'] ) && $args['daily'] ) {
-				$from_date = gmdate( 'Y-m-d', strtotime( $args['from_date'] ) );
-				$where    .= $wpdb->prepare( " AND DATE({$table_name}.dp_date) >= DATE(%s) ", $from_date ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-			}
-
-			if ( isset( $args['to_date'] ) && ! empty( $args['to_date'] ) && $args['daily'] ) {
-				$to_date = gmdate( 'Y-m-d', strtotime( $args['to_date'] ) );
-				$where  .= $wpdb->prepare( " AND DATE({$table_name}.dp_date) <= DATE(%s) ", $to_date ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			if ( ! empty( $date_range ) ) {
+				$where .= $wpdb->prepare( " AND {$table_name}.dp_date >= %s AND {$table_name}.dp_date < %s ", $date_range['from'], $date_range['until'] ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 			}
 
 			$groupby = ' ';
@@ -659,31 +741,25 @@ class Dashboard {
 		} else {
 			// Single site: existing behaviour filtered by current blog.
 			$fields[] = ( $args['daily'] ) ? "SUM({$table_name}.cntaccess) as visits" : "{$table_name}.cntaccess as visits";
-			$fields[] = "{$wpdb->posts}.ID";
+			$fields[] = "{$table_name}.postnumber as ID";
 
 			$fields = implode( ', ', $fields );
 
 			// Create the JOIN clause.
-			$join = " INNER JOIN {$wpdb->posts} ON {$table_name}.postnumber={$wpdb->posts}.ID ";
+			$join = " LEFT JOIN {$wpdb->posts} ON {$table_name}.postnumber={$wpdb->posts}.ID ";
 
 			// Create the base WHERE clause.
 			$where  = $wpdb->prepare( " AND {$table_name}.blog_id = %d ", $args['blog_id'] ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-			$where .= " AND ($wpdb->posts.post_status = 'publish' OR $wpdb->posts.post_status = 'inherit') ";   // Show published posts and attachments.
-			$where .= " AND ($wpdb->posts.post_type <> 'revision' ) ";   // No revisions.
+			$where .= " AND (($wpdb->posts.post_status = 'publish' OR $wpdb->posts.post_status = 'inherit') OR {$sitewide_sql}) ";   // Show published posts, attachments and site-wide contexts.
+			$where .= " AND (($wpdb->posts.post_type <> 'revision' ) OR {$sitewide_sql}) ";   // No revisions.
 
-			if ( isset( $args['from_date'] ) && ! empty( $args['from_date'] ) ) {
-				$from_date = gmdate( 'Y-m-d', strtotime( $args['from_date'] ) );
-				$where    .= $wpdb->prepare( " AND DATE({$table_name}.dp_date) >= DATE(%s) ", $from_date ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-			}
-
-			if ( isset( $args['to_date'] ) && ! empty( $args['to_date'] ) ) {
-				$to_date = gmdate( 'Y-m-d', strtotime( $args['to_date'] ) );
-				$where  .= $wpdb->prepare( " AND DATE({$table_name}.dp_date) <= DATE(%s) ", $to_date ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			if ( ! empty( $date_range ) ) {
+				$where .= $wpdb->prepare( " AND {$table_name}.dp_date >= %s AND {$table_name}.dp_date < %s ", $date_range['from'], $date_range['until'] ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 			}
 
 			// Create the base GROUP BY clause.
 			if ( $args['daily'] ) {
-				$groupby = " {$wpdb->posts}.ID";
+				$groupby = " {$table_name}.postnumber";
 			}
 
 			// Create the base ORDER BY clause.

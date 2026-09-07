@@ -124,7 +124,10 @@ class Import_Export {
 		?>
 	<div class="wrap">
 		<h1><?php esc_html_e( 'Top 10 - Import/Export tables', 'top-10' ); ?></h1>
-		<?php do_action( 'tptn_settings_page_header' ); ?>
+		<?php
+		/** This action is documented in includes/admin/class-dashboard.php */
+		do_action( 'tptn_settings_page_header' );
+		?>
 
 		<?php settings_errors(); ?>
 
@@ -454,7 +457,7 @@ class Import_Export {
 			$blog_id = isset( $row['blog_id'] ) ? absint( $row['blog_id'] ) : get_current_blog_id();
 
 			if ( $use_urls && ! empty( $row['url'] ) ) {
-				$url = esc_url_raw( trim( $row['url'] ) );
+				$url = esc_url_raw( trim( $row['url'], " \t\n\r\0\x0B" ) );
 				if ( ! isset( $url_list[ $url ] ) ) {
 					$url_list[ $url ] = url_to_postid( $url );
 				}
@@ -470,7 +473,7 @@ class Import_Export {
 			}
 
 			if ( $daily ) {
-				$raw_date = isset( $row['dp_date'] ) ? trim( $row['dp_date'] ) : '';
+				$raw_date = isset( $row['dp_date'] ) ? trim( $row['dp_date'], " \t\n\r\0\x0B" ) : '';
 				try {
 					$dp_date = ( new \DateTime( $raw_date ) )->format( 'Y-m-d H' );
 				} catch ( \Exception $e ) {

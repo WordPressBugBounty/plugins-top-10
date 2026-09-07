@@ -1,6 +1,6 @@
 <?php
 /**
- * Autoloads classes from the WebberZone\Top_Ten namespace.
+ * Initializes Freemius SDK for Top 10 Pro.
  *
  * @package WebberZone\Top_Ten
  */
@@ -9,6 +9,12 @@ namespace WebberZone\Top_Ten;
 
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
+}
+if ( ! function_exists( 'fs_dynamic_init' ) ) {
+	$fs_start = __DIR__ . '/vendor/freemius/wordpress-sdk/start.php';
+	if ( file_exists( $fs_start ) ) {
+		require $fs_start;
+	}
 }
 if ( ! function_exists( __NAMESPACE__ . '\\tptn_freemius' ) ) {
 	/**
@@ -21,8 +27,6 @@ if ( ! function_exists( __NAMESPACE__ . '\\tptn_freemius' ) ) {
 			if ( ! defined( 'WP_FS__PRODUCT_16384_MULTISITE' ) ) {
 				define( 'WP_FS__PRODUCT_16384_MULTISITE', true );
 			}
-			// Include Freemius SDK.
-			require_once __DIR__ . '/vendor/freemius/start.php';
 			$tptn_freemius = \fs_dynamic_init(
 				array(
 					'id'               => '16384',

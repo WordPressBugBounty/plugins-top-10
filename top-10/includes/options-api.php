@@ -19,7 +19,7 @@ if ( ! defined( 'WPINC' ) ) {
  */
 function tptn_get_settings() {
 
-	$settings = get_option( 'tptn_settings' );
+	$settings = get_option( 'tptn_settings', array() );
 
 	/**
 	 * Settings array
@@ -37,18 +37,16 @@ function tptn_get_settings() {
  *
  * Looks to see if the specified setting exists, returns default if not
  *
- * @since  2.5.0
+ * @since 2.5.0
  *
- * @param string $key Option to fetch.
- * @param mixed  $default_value Default option.
+ * @param  string $key           Option to fetch.
+ * @param  mixed  $default_value Default option.
  * @return mixed
  */
 function tptn_get_option( $key = '', $default_value = null ) {
 	global $tptn_settings;
 
-	if ( empty( $tptn_settings ) ) {
-		$tptn_settings = tptn_get_settings();
-	}
+	$tptn_settings = tptn_get_settings();
 
 	if ( is_null( $default_value ) ) {
 		$default_value = tptn_get_default_option( $key );
@@ -110,6 +108,14 @@ function tptn_update_option( $key = '', $value = false ) {
 	$options = get_option( 'tptn_settings' );
 
 	// Let's let devs alter that value coming in.
+	/**
+	 * Filters a setting value before it is written to the options table.
+	 *
+	 * @since 2.5.0
+	 *
+	 * @param mixed  $value The value being saved.
+	 * @param string $key   The settings key being updated.
+	 */
 	$value = apply_filters( 'tptn_update_option', $value, $key );
 
 	// Next let's try to update the value.
@@ -254,12 +260,13 @@ function tptn_get_settings_with_defaults() {
  *
  * @since 1.3.0
  *
- * @param string $key Key of the option to fetch.
+ * @param  string $key Key of the option to fetch.
  * @return mixed
  */
 function tptn_get_default_option( $key = '' ) {
 
-	$default_settings = tptn_settings_defaults();
+	/** This filter is documented in includes/options-api.php */
+	$default_settings = apply_filters( 'tptn_settings_defaults', \WebberZone\Top_Ten\Admin\Settings::get_defaults() );
 
 	if ( array_key_exists( $key, $default_settings ) ) {
 		return $default_settings[ $key ];
@@ -345,15 +352,17 @@ function tptn_tags_search() {
 		$s = explode( ',', $s );
 		$s = $s[ count( $s ) - 1 ];
 	}
-	$s = trim( $s );
+	$s = trim( $s, " \t\n\r\0\x0B" );
 
-	/** This filter has been defined in /wp-admin/includes/ajax-actions.php */
+	/**
+ * This filter has been defined in /wp-admin/includes/ajax-actions.php
+*/
 	$term_search_min_chars = (int) apply_filters( 'term_search_min_chars', 2, $tax, $s );
 
 	/*
-	 * Require $term_search_min_chars chars for matching (default: 2)
-	 * ensure it's a non-negative, non-zero integer.
-	 */
+	* Require $term_search_min_chars chars for matching (default: 2)
+	* ensure it's a non-negative, non-zero integer.
+	*/
 	if ( ( 0 === $term_search_min_chars ) || ( strlen( $s ) < $term_search_min_chars ) ) {
 		wp_die();
 	}

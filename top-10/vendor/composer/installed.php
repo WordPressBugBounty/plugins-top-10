@@ -1,0 +1,41 @@
+<?php return array(
+    'root' => array(
+        'name' => 'webberzone/top-10',
+        'pretty_version' => 'dev-master',
+        'version' => 'dev-master',
+        'reference' => '3864c51bdc95c398b2f431820c1f0e8651110412',
+        'type' => 'wordpress-plugin',
+        'install_path' => __DIR__ . '/../../',
+        'aliases' => array(),
+        'dev' => false,
+    ),
+    'versions' => array(
+        'freemius/wordpress-sdk' => array(
+            'pretty_version' => '2.13.4',
+            'version' => '2.13.4.0',
+            'reference' => 'fa43eb92ae9dffa0d9f5ae11b5a1739bd7222308',
+            'type' => 'library',
+            'install_path' => __DIR__ . '/../freemius/wordpress-sdk',
+            'aliases' => array(),
+            'dev_requirement' => false,
+        ),
+        'jaybizzle/crawler-detect' => array(
+            'pretty_version' => 'v1.4.1',
+            'version' => '1.4.1.0',
+            'reference' => '770e00e5bcd35054871a6f790f380123cc3b8b0c',
+            'type' => 'library',
+            'install_path' => __DIR__ . '/../jaybizzle/crawler-detect',
+            'aliases' => array(),
+            'dev_requirement' => false,
+        ),
+        'webberzone/top-10' => array(
+            'pretty_version' => 'dev-master',
+            'version' => 'dev-master',
+            'reference' => '3864c51bdc95c398b2f431820c1f0e8651110412',
+            'type' => 'wordpress-plugin',
+            'install_path' => __DIR__ . '/../../',
+            'aliases' => array(),
+            'dev_requirement' => false,
+        ),
+    ),
+);

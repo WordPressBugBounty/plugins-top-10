@@ -33,6 +33,16 @@ class Dashboard_Widgets {
 	}
 
 	/**
+	 * Clear cached network dashboard widget output.
+	 *
+	 * @since 4.5.0
+	 */
+	public static function clear_network_dashboard_cache() {
+		update_site_option( 'tptn_network_dashboard_cache_version', wp_generate_uuid4() );
+		delete_site_transient( 'tptn_network_popular_posts_count' );
+	}
+
+	/**
 	 * Add Top 10 views from the current hour to the At a Glance widget.
 	 *
 	 * @since 4.3.0
@@ -255,6 +265,40 @@ class Dashboard_Widgets {
 			$limit = \tptn_get_option( 'limit' );
 		}
 
+		$cache_key = '';
+		$cache_ttl = 0;
+		if ( $network && $widget ) {
+			/**
+			 * Filters how long the network dashboard widget output is cached.
+			 *
+			 * @since 4.5.0
+			 *
+			 * @param int $cache_ttl Cache lifetime in seconds. Default 15 minutes.
+			 */
+			$cache_ttl = max( 0, (int) apply_filters( 'tptn_network_dashboard_cache_ttl', 15 * MINUTE_IN_SECONDS ) );
+			$cache_key = 'tptn_network_dashboard_' . md5(
+				(string) wp_json_encode(
+					array(
+						'version'   => get_site_option( 'tptn_network_dashboard_cache_version', '1' ),
+						'daily'     => (bool) $daily,
+						'orderby'   => $daily ? 'daily_count' : 'total_count',
+						'order'     => 'DESC',
+						'from_date' => current_time( 'Y-m-d' ),
+						'to_date'   => current_time( 'Y-m-d' ),
+						'page'      => (int) $page,
+						'limit'     => (int) $limit,
+					)
+				)
+			);
+
+			if ( $cache_ttl > 0 ) {
+				$cached = get_site_transient( $cache_key );
+				if ( false !== $cached ) {
+					return $cached;
+				}
+			}
+		}
+
 		$args   = array();
 		$visits = 'total_count';
 		if ( $daily ) {
@@ -273,6 +317,10 @@ class Dashboard_Widgets {
 					continue;
 				}
 
+				$context_key = class_exists( 'WebberZone\\Top_Ten\\Pro\\Sitewide_Database' ) && \WebberZone\Top_Ten\Pro\Sitewide_Database::is_available()
+					? \WebberZone\Top_Ten\Pro\Sitewide_Database::get_context_key( $result['ID'], $result['blog_id'] ?? null )
+					: '';
+
 				// Handle network context differently.
 				if ( $network ) {
 					// Check if blog exists.
@@ -281,22 +329,32 @@ class Dashboard_Widgets {
 						continue; // Skip if blog doesn't exist.
 					}
 
-					// Get post from specific blog.
-					$post = get_blog_post( $result['blog_id'], $result['ID'] );
-					if ( ! $post || 'publish' !== $post->post_status ) {
-						continue; // Skip if post doesn't exist or isn't published.
-					}
+					if ( '' !== $context_key ) {
+						$label   = \WebberZone\Top_Ten\Pro\Sitewide_Database::get_context_label( $context_key );
+						$output .= '<li>' . esc_html( $label ) . ' <span class="tptn-sitewide-label">(' . esc_html__( 'site-wide', 'top-10' ) . ')</span>';
+					} else {
+						// Get post from specific blog.
+						$post = get_blog_post( $result['blog_id'], $result['ID'] );
+						if ( ! $post || 'publish' !== $post->post_status ) {
+							continue; // Skip if post doesn't exist or isn't published.
+						}
 
-					$output .= '<li><a href="' . get_blog_permalink( $result['blog_id'], $result['ID'] ) . '">' . esc_html( $post->post_title ) . '</a>';
+						$output .= '<li><a href="' . get_blog_permalink( $result['blog_id'], $result['ID'] ) . '">' . esc_html( $post->post_title ) . '</a>';
+					}
 					$output .= ' (' . Helpers::number_format_i18n( $result[ $visits ] ) . ')';
 					$output .= ' <span class="tptn-blog-name">- ' . esc_html( $blog_details->blogname ) . '</span>';
 					$output .= '</li>';
 				} else {
 					// Single site context.
-					if ( ! get_post_status( $result['ID'] ) ) {
-						continue;
+					if ( '' !== $context_key ) {
+						$label   = \WebberZone\Top_Ten\Pro\Sitewide_Database::get_context_label( $context_key );
+						$output .= '<li>' . esc_html( $label ) . ' <span class="tptn-sitewide-label">(' . esc_html__( 'site-wide', 'top-10' ) . ')</span>';
+					} else {
+						if ( ! get_post_status( $result['ID'] ) ) {
+							continue;
+						}
+						$output .= '<li><a href="' . get_permalink( $result['ID'] ) . '">' . get_the_title( $result['ID'] ) . '</a>';
 					}
-					$output .= '<li><a href="' . get_permalink( $result['ID'] ) . '">' . get_the_title( $result['ID'] ) . '</a>';
 					$output .= ' (' . Helpers::number_format_i18n( $result[ $visits ] ) . ')';
 					$output .= '</li>';
 				}
@@ -350,7 +408,13 @@ class Dashboard_Widgets {
 		 * @param   bool     $widget  Is this a widget
 		 * @param   bool     $network Is this network-wide
 		 */
-		return apply_filters( 'tptn_popular_posts_widget_output', $output, $daily, $page, $limit, $widget, $network );
+		$output = apply_filters( 'tptn_popular_posts_widget_output', $output, $daily, $page, $limit, $widget, $network );
+
+		if ( $network && $widget && $cache_ttl > 0 ) {
+			set_site_transient( $cache_key, $output, $cache_ttl );
+		}
+
+		return $output;
 	}
 
 

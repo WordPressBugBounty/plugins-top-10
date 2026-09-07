@@ -130,6 +130,14 @@ class REST_API extends \WP_REST_Controller {
 			);
 		}
 
+		/**
+		 * Filters the result of the permissions check for the Top 10 REST endpoints.
+		 *
+		 * @since 3.0.0
+		 *
+		 * @param bool             $permission Whether the request is allowed.
+		 * @param \WP_REST_Request $request    The REST request object.
+		 */
 		return apply_filters( 'top_ten_rest_api_permissions_check', true, $request );
 	}
 
@@ -233,13 +241,22 @@ class REST_API extends \WP_REST_Controller {
 	 * @return mixed|\WP_REST_Response Array of post objects or post IDs.
 	 */
 	public function update_post_count( $request ) {
+		if ( ! \WebberZone\Top_Ten\Tracker::is_tracking_request_allowed() ) {
+			$response = new \WP_REST_Response( '', 204 );
+			$response->header( 'Cache-Control', 'max-age=15, s-maxage=0' );
+			return $response;
+		}
 
 		$id               = absint( $request->get_param( 'top_ten_id' ) );
+		$sitewide_context = sanitize_text_field( $request->get_param( 'top_ten_sitewide_context' ) );
 		$blog_id          = absint( $request->get_param( 'top_ten_blog_id' ) );
 		$activate_counter = absint( $request->get_param( 'activate_counter' ) );
 		$top_ten_debug    = absint( $request->get_param( 'top_ten_debug' ) );
 
 		$str = \WebberZone\Top_Ten\Tracker::update_count( $id, $blog_id, $activate_counter );
+		if ( '' !== $sitewide_context ) {
+			$str .= \WebberZone\Top_Ten\Tracker::update_sitewide_count( $sitewide_context, $blog_id, $activate_counter );
+		}
 
 		if ( 1 === $top_ten_debug ) {
 			return rest_ensure_response( $str );
@@ -317,6 +334,13 @@ class REST_API extends \WP_REST_Controller {
 			),
 		);
 
+		/**
+		 * Filters the query parameters accepted by the popular posts REST endpoint.
+		 *
+		 * @since 3.0.0
+		 *
+		 * @param array $args Collection parameters, keyed by parameter name.
+		 */
 		return apply_filters( 'top_ten_rest_api_get_items_params', $args );
 	}
 
@@ -329,28 +353,40 @@ class REST_API extends \WP_REST_Controller {
 	 */
 	public function get_tracker_params() {
 		$args = array(
-			'top_ten_id'       => array(
+			'top_ten_id'               => array(
 				'description'       => esc_html__( 'ID of the post.', 'top-10' ),
 				'type'              => 'integer',
 				'sanitize_callback' => 'absint',
 			),
-			'top_ten_blog_id'  => array(
+			'top_ten_sitewide_context' => array(
+				'description'       => esc_html__( 'Site-wide tracking context: front_page, home_page, search, category, tag, taxonomy, author, post_type_archive, date_archive, archive or other. Each key maps to a fixed reserved ID in the shared count tables.', 'top-10' ),
+				'type'              => 'string',
+				'sanitize_callback' => 'sanitize_text_field',
+			),
+			'top_ten_blog_id'          => array(
 				'description'       => esc_html__( 'Blog ID of the post.', 'top-10' ),
 				'type'              => 'integer',
 				'sanitize_callback' => 'absint',
 			),
-			'activate_counter' => array(
+			'activate_counter'         => array(
 				'description'       => esc_html__( 'Activate counter flag.', 'top-10' ),
 				'type'              => 'integer',
 				'sanitize_callback' => 'absint',
 			),
-			'top_ten_debug'    => array(
+			'top_ten_debug'            => array(
 				'description'       => esc_html__( 'Debug flag.', 'top-10' ),
 				'type'              => 'integer',
 				'sanitize_callback' => 'absint',
 			),
 		);
 
+		/**
+		 * Filters the query parameters accepted by the tracker REST endpoint.
+		 *
+		 * @since 3.0.0
+		 *
+		 * @param array $args Collection parameters, keyed by parameter name.
+		 */
 		return apply_filters( 'top_ten_rest_api_get_tracker_params', $args );
 	}
 
@@ -390,6 +426,13 @@ class REST_API extends \WP_REST_Controller {
 			),
 		);
 
+		/**
+		 * Filters the query parameters accepted by the counter REST endpoint.
+		 *
+		 * @since 3.4.0-RC1
+		 *
+		 * @param array $args Collection parameters, keyed by parameter name.
+		 */
 		return apply_filters( 'top_ten_rest_api_get_counter_params', $args );
 	}
 

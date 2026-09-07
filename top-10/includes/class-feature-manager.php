@@ -16,15 +16,10 @@ if ( ! defined( 'WPINC' ) ) {
 /**
  * Feature Manager class.
  *
- * Reads the raw settings option to determine whether an optional feature
- * should be instantiated. All features default to enabled - a missing
- * settings key means the feature is on, so upgrades see no change in
- * behaviour.
- *
- * This class intentionally does not use tptn_get_option(): that function
- * falls back to the registered settings defaults, which would load the
- * admin Settings class on every request. It is safe to call at
- * plugins_loaded.
+ * All features default to enabled — a missing settings key means the feature is on, so
+ * upgrades see no change in behaviour. Reads the raw settings option directly instead
+ * of tptn_get_option(), which would load the admin Settings class on every request;
+ * this makes the check safe to call at plugins_loaded.
  *
  * @since 4.4.0
  */
@@ -82,6 +77,18 @@ class Feature_Manager {
 			),
 			'popular_authors'         => array(
 				'setting' => 'enable_popular_authors',
+				'default' => true,
+			),
+			'page_builders'           => array(
+				'setting' => 'enable_page_builders',
+				'default' => true,
+			),
+			'sitewide_tracking'       => array(
+				'setting' => 'enable_sitewide_tracking',
+				'default' => true,
+			),
+			'daily_table_rollup'      => array(
+				'setting' => 'enable_daily_table_rollup',
 				'default' => true,
 			),
 		);

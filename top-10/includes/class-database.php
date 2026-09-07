@@ -17,6 +17,34 @@ use WebberZone\Top_Ten\Util\Helpers;
 class Database {
 
 	/**
+	 * Cached status of the required Top 10 tables for this request.
+	 *
+	 * @var array<string,bool>
+	 */
+	private static $table_installation_cache = array();
+
+	/**
+	 * Database version used to populate the request cache.
+	 *
+	 * @var string|null
+	 */
+	private static $table_installation_cache_version = null;
+
+	/**
+	 * Cached status of non-standard tables checked during this request.
+	 *
+	 * @var array<string,bool>
+	 */
+	private static $individual_table_cache = array();
+
+	/**
+	 * Cached table metadata for this request.
+	 *
+	 * @var array<string,array<string,array<string,int|string>>>
+	 */
+	private static $table_metadata_cache = array();
+
+	/**
 	 * Constructor.
 	 */
 	public function __construct() {
@@ -77,6 +105,37 @@ class Database {
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared
 		return (int) $wpdb->get_var( $sql );
+	}
+
+	/**
+	 * Get the count for a site-wide request context.
+	 *
+	 * Site-wide contexts are resolved by the Pro-only fixed-ID map and then
+	 * addressed by their reserved numeric ID in the shared count tables.
+	 *
+	 * @since 4.5.0
+	 *
+	 * @param string   $context    Site-wide context key.
+	 * @param int|null $blog_id    Blog ID (optional, defaults to current blog).
+	 * @param bool     $daily      Whether to get the daily count.
+	 * @param array    $date_range Date range array for daily counts.
+	 * @return int Site-wide count.
+	 */
+	public static function get_sitewide_count( $context, $blog_id = null, $daily = false, $date_range = array() ) {
+		/**
+		 * Filters the view count for a site-wide context.
+		 *
+		 * Site-wide contexts are a Pro feature; the free plugin always returns 0.
+		 *
+		 * @since 4.5.0
+		 *
+		 * @param int      $count      The site-wide count.
+		 * @param string   $context    Site-wide context key.
+		 * @param int|null $blog_id    Blog ID, or null for the current blog.
+		 * @param bool     $daily      Whether a daily count was requested.
+		 * @param array    $date_range Date range used for daily counts.
+		 */
+		return (int) apply_filters( 'tptn_get_sitewide_count', 0, $context, $blog_id, $daily, $date_range );
 	}
 
 	/**
@@ -143,6 +202,16 @@ class Database {
 
 		// Trigger action to clear cache.
 		if ( false !== $result ) {
+			/**
+			 * Fires after a post's view count has been written to the database.
+			 *
+			 * @since 4.2.0
+			 *
+			 * @param int  $post_id Post ID.
+			 * @param int  $count   The count that was stored.
+			 * @param int  $blog_id Blog ID.
+			 * @param bool $daily   Whether the daily table was updated.
+			 */
 			do_action( 'tptn_set_count', $post_id, $count, $blog_id, $daily );
 		}
 
@@ -214,6 +283,13 @@ class Database {
 
 		// Trigger action to clear cache.
 		if ( false !== $result ) {
+			/**
+			 * Fires after view counts have been deleted from the database.
+			 *
+			 * @since 4.2.0
+			 *
+			 * @param array $args Arguments describing which counts were deleted.
+			 */
 			do_action( 'tptn_delete_counts', $args );
 		}
 
@@ -221,7 +297,7 @@ class Database {
 	}
 
 	/**
-	 * Get table statistics including entry count and size.
+	 * Get estimated table statistics including entry count and size.
 	 *
 	 * @since 4.2.0
 	 *
@@ -232,24 +308,38 @@ class Database {
 		$stats     = wp_cache_get( $cache_key, 'top-10' );
 
 		if ( false === $stats ) {
-			$stats = array();
+			$stats = is_multisite() ? get_site_transient( $cache_key ) : get_transient( $cache_key );
+		}
 
-			$tables = array(
+		if ( false === $stats ) {
+			$tables   = array(
 				'top_ten'               => self::get_table( false ),
 				'top_ten_daily'         => self::get_table( true ),
 				'top_ten_visits_funnel' => self::get_funnel_table(),
 				'top_ten_visits_log'    => self::get_log_table(),
 			);
+			$metadata = self::get_table_metadata( array_values( $tables ) );
+			$stats    = array();
 
 			foreach ( $tables as $key => $table_name ) {
-				if ( self::is_table_installed( $table_name ) ) {
-					$stats[ $key ] = self::get_single_table_statistics( $table_name );
+				if ( isset( $metadata[ $table_name ] ) ) {
+					$stats[ $key ] = array(
+						'entries'   => $metadata[ $table_name ]['table_rows'],
+						'size'      => $metadata[ $table_name ]['data_length'] + $metadata[ $table_name ]['index_length'],
+						'estimated' => true,
+					);
 				}
 			}
 
-			// Cache for 5 minutes.
-			wp_cache_set( $cache_key, $stats, 'top-10', 300 );
+			// Cache for 5 minutes. Network-wide table metadata is shared by all sites.
+			if ( is_multisite() ) {
+				set_site_transient( $cache_key, $stats, 5 * MINUTE_IN_SECONDS );
+			} else {
+				set_transient( $cache_key, $stats, 5 * MINUTE_IN_SECONDS );
+			}
 		}
+
+		wp_cache_set( $cache_key, $stats, 'top-10', 5 * MINUTE_IN_SECONDS );
 
 		/**
 		 * Filter the table statistics.
@@ -262,65 +352,115 @@ class Database {
 	}
 
 	/**
-	 * Get entry count and estimated size for a single table.
+	 * Get table metadata for a set of tables.
 	 *
-	 * @since 4.3.0
+	 * @since 4.5.0
 	 *
-	 * @param string $table_name Table name.
-	 * @return array {
-	 *     @type int   $entries Number of entries.
-	 *     @type float $size    Estimated size in bytes.
-	 * }
+	 * @param string[] $tables Tables to inspect.
+	 * @param bool     $force  Whether to bypass the request cache.
+	 * @return array<string,array<string,int|string>> Table metadata keyed by name.
 	 */
-	private static function get_single_table_statistics( $table_name ) {
+	private static function get_table_metadata( $tables, $force = false ) {
 		global $wpdb;
 
-		// Get row count.
-		if ( is_network_admin() ) {
-			// In network admin, count all entries.
-			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-			$count = $wpdb->get_var( "SELECT COUNT(*) FROM `{$table_name}`" );
+		$tables = array_values( array_unique( array_filter( $tables, 'is_string' ) ) );
+		if ( empty( $tables ) ) {
+			return array();
+		}
+
+		$cache_key = implode( '|', $tables );
+		if ( ! $force && isset( self::$table_metadata_cache[ $cache_key ] ) ) {
+			return self::$table_metadata_cache[ $cache_key ];
+		}
+
+		$placeholders = implode( ', ', array_fill( 0, count( $tables ), '%s' ) );
+		if ( self::is_sqlite() ) {
+			$sql = $wpdb->prepare(
+				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
+				"SELECT name AS TABLE_NAME, 0 AS TABLE_ROWS, 0 AS DATA_LENGTH, 0 AS INDEX_LENGTH FROM sqlite_master WHERE type = 'table' AND name IN ({$placeholders})",
+				...$tables
+			);
 		} else {
-			// In individual site admin, count only entries for this blog.
-			$count = $wpdb->get_var( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-				$wpdb->prepare(
-					"SELECT COUNT(*) FROM `{$table_name}` WHERE blog_id = %d", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-					get_current_blog_id()
-				)
+			$sql = $wpdb->prepare(
+				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
+				"SELECT TABLE_NAME, TABLE_ROWS, DATA_LENGTH, INDEX_LENGTH FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ({$placeholders})",
+				...$tables
 			);
 		}
 
-		// Refresh InnoDB stats so information_schema reflects the current state.
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-		$wpdb->query( "ANALYZE TABLE `{$table_name}`" );
-
-		// Get table size in bytes (always shows total size across all blogs).
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-		$size = $wpdb->get_var(
-			$wpdb->prepare(
-				'SELECT (data_length + index_length) FROM information_schema.TABLES WHERE table_schema = %s AND table_name = %s',
-				defined( 'DB_NAME' ) ? DB_NAME : '', // @codingStandardsIgnoreLine - WordPress constant
-				$table_name
-			)
-		);
-
-		// Calculate size for individual sites in multisite.
-		$calculated_size = $size ? (int) $size : 0;
-		if ( is_multisite() && ! is_network_admin() && $calculated_size > 0 ) {
-			// Get total entries to calculate ratio.
-			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-			$total_count = $wpdb->get_var( "SELECT COUNT(*) FROM `{$table_name}`" );
-
-			if ( $total_count > 0 && $count > 0 ) {
-				// Estimate size based on entry count ratio.
-				$calculated_size = ( $count / $total_count ) * $calculated_size;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared
+		$rows     = $wpdb->get_results( $sql, ARRAY_A );
+		$metadata = array();
+		foreach ( $rows as $row ) {
+			$table_name = isset( $row['TABLE_NAME'] ) ? (string) $row['TABLE_NAME'] : '';
+			if ( '' !== $table_name && in_array( $table_name, $tables, true ) ) {
+				$metadata[ $table_name ] = array(
+					'table_rows'   => absint( $row['TABLE_ROWS'] ?? 0 ),
+					'data_length'  => absint( $row['DATA_LENGTH'] ?? 0 ),
+					'index_length' => absint( $row['INDEX_LENGTH'] ?? 0 ),
+				);
 			}
 		}
 
-		return array(
-			'entries' => absint( $count ),
-			'size'    => $calculated_size,
-		);
+		// Temporary tables are not exposed through information_schema or sqlite_master.
+		foreach ( array_diff( $tables, array_keys( $metadata ) ) as $table_name ) {
+			$query           = $wpdb->prepare( 'SELECT 1 FROM %i LIMIT 0', $table_name );
+			$suppress_errors = $wpdb->suppress_errors();
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared
+			$table_exists = false !== $wpdb->query( $query );
+			$wpdb->suppress_errors( $suppress_errors );
+
+			if ( $table_exists ) {
+				$metadata[ $table_name ] = array(
+					'table_rows'   => 0,
+					'data_length'  => 0,
+					'index_length' => 0,
+				);
+			}
+		}
+
+		self::$table_metadata_cache[ $cache_key ] = $metadata;
+
+		return $metadata;
+	}
+
+	/**
+	 * Get installation status for a set of tables.
+	 *
+	 * @since 4.5.0
+	 *
+	 * @param string[] $tables Tables to inspect.
+	 * @param bool     $force  Whether to bypass the request cache.
+	 * @return array<string,bool> Table statuses keyed by name.
+	 */
+	private static function get_table_statuses( $tables, $force = false ) {
+		$tables   = array_values( array_unique( array_filter( $tables, 'is_string' ) ) );
+		$metadata = self::get_table_metadata( $tables, $force );
+		$statuses = array_fill_keys( $tables, false );
+
+		foreach ( array_keys( $metadata ) as $table ) {
+			$statuses[ $table ] = true;
+		}
+
+		return $statuses;
+	}
+
+	/**
+	 * Determine whether the current database is SQLite.
+	 *
+	 * @since 4.5.0
+	 *
+	 * @return bool Whether SQLite is in use.
+	 */
+	private static function is_sqlite() {
+		global $wpdb;
+
+		if ( defined( 'DATABASE_TYPE' ) && 'sqlite' === strtolower( (string) DATABASE_TYPE ) ) {
+			return true;
+		}
+
+		return method_exists( $wpdb, 'db_server_info' ) && false !== strpos( strtolower( (string) $wpdb->db_server_info() ), 'sqlite' );
 	}
 
 	/**
@@ -330,6 +470,84 @@ class Database {
 	 */
 	public static function clear_table_statistics_cache() {
 		wp_cache_delete( 'tptn_table_statistics', 'top-10' );
+
+		if ( is_multisite() ) {
+			delete_site_transient( 'tptn_table_statistics' );
+		} else {
+			delete_transient( 'tptn_table_statistics' );
+		}
+	}
+
+	/**
+	 * Invalidate the persistent and request-level table installation caches.
+	 *
+	 * @since 4.5.0
+	 */
+	public static function clear_table_installation_cache() {
+		self::$table_installation_cache         = array();
+		self::$table_installation_cache_version = null;
+		self::$individual_table_cache           = array();
+		self::$table_metadata_cache             = array();
+
+		delete_site_option( 'tptn_tables_installed' );
+	}
+
+	/**
+	 * Get the installation status of the four required Top 10 tables.
+	 *
+	 * The status is persisted in a network option so normal admin requests do
+	 * not need to enumerate the database tables. Explicit diagnostic requests
+	 * can bypass the cache by setting $force to true.
+	 *
+	 * @since 4.5.0
+	 *
+	 * @param bool $force Whether to perform a live check.
+	 * @return array<string,bool> Table names mapped to their installation status.
+	 */
+	public static function get_table_installation_status( $force = false ) {
+		global $tptn_db_version;
+
+		$tables  = array(
+			self::get_table( false ),
+			self::get_table( true ),
+			self::get_funnel_table(),
+			self::get_log_table(),
+		);
+		$version = isset( $tptn_db_version ) ? (string) $tptn_db_version : '';
+
+		$has_cached_tables = self::$table_installation_cache_version === $version && count( self::$table_installation_cache ) === count( $tables ) && ! array_diff_key( array_fill_keys( $tables, true ), self::$table_installation_cache );
+		if ( ! $force && $has_cached_tables ) {
+			return self::$table_installation_cache;
+		}
+
+		if ( ! $force ) {
+			$cached         = get_site_option( 'tptn_tables_installed', array() );
+			$has_all_tables = is_array( $cached ) && isset( $cached['db_version'], $cached['tables'] ) && (string) $cached['db_version'] === $version && is_array( $cached['tables'] ) && ! array_diff_key( array_fill_keys( $tables, true ), $cached['tables'] );
+			if ( $has_all_tables ) {
+				self::$table_installation_cache = array();
+				self::$individual_table_cache   = array();
+				foreach ( $tables as $table ) {
+					self::$table_installation_cache[ $table ] = (bool) $cached['tables'][ $table ];
+				}
+				self::$table_installation_cache_version = $version;
+
+				return self::$table_installation_cache;
+			}
+		}
+
+		$statuses = self::get_table_statuses( $tables, $force );
+
+		self::$table_installation_cache         = $statuses;
+		self::$table_installation_cache_version = $version;
+		update_site_option(
+			'tptn_tables_installed',
+			array(
+				'db_version' => $version,
+				'tables'     => $statuses,
+			)
+		);
+
+		return $statuses;
 	}
 
 	/**
@@ -338,22 +556,30 @@ class Database {
 	 * @since 4.2.0
 	 *
 	 * @param string $table Table name to check.
+	 * @param bool   $force Whether to perform a live check.
 	 * @return bool True if table exists, false otherwise.
 	 */
-	public static function is_table_installed( $table ) {
-		global $wpdb;
+	public static function is_table_installed( $table, $force = false ) {
+		$required_tables = array(
+			self::get_table( false ),
+			self::get_table( true ),
+			self::get_funnel_table(),
+			self::get_log_table(),
+		);
 
-		static $cache = array();
-
-		if ( isset( $cache[ $table ] ) ) {
-			return $cache[ $table ];
+		if ( in_array( $table, $required_tables, true ) ) {
+			$statuses = self::get_table_installation_status( $force );
+			return ! empty( $statuses[ $table ] );
 		}
 
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-		$result          = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
-		$cache[ $table ] = ( $result === $table );
+		if ( ! $force && array_key_exists( $table, self::$individual_table_cache ) ) {
+			return self::$individual_table_cache[ $table ];
+		}
 
-		return $cache[ $table ];
+		$statuses                               = self::get_table_statuses( array( $table ), $force );
+		self::$individual_table_cache[ $table ] = ! empty( $statuses[ $table ] );
+
+		return self::$individual_table_cache[ $table ];
 	}
 
 	/**
@@ -403,10 +629,10 @@ class Database {
 
 		if ( $args['daily'] ) {
 			if ( ! empty( $args['from_date'] ) ) {
-				$where[] = $wpdb->prepare( 'DATE(t.dp_date) >= DATE(%s)', $args['from_date'] );
+				$where[] = $wpdb->prepare( 't.dp_date >= %s', gmdate( 'Y-m-d 00:00:00', strtotime( $args['from_date'] ) ) );
 			}
 			if ( ! empty( $args['to_date'] ) ) {
-				$where[] = $wpdb->prepare( 'DATE(t.dp_date) <= DATE(%s)', $args['to_date'] );
+				$where[] = $wpdb->prepare( 't.dp_date < %s', gmdate( 'Y-m-d 00:00:00', strtotime( $args['to_date'] . ' +1 day' ) ) );
 			}
 		}
 
@@ -544,8 +770,10 @@ class Database {
 	 * @return bool True if both tables exist, false otherwise.
 	 */
 	public static function are_tables_installed() {
-		return self::is_table_installed( self::get_table( false ) )
-			&& self::is_table_installed( self::get_table( true ) );
+		$statuses = self::get_table_installation_status();
+
+		return ! empty( $statuses[ self::get_table( false ) ] )
+			&& ! empty( $statuses[ self::get_table( true ) ] );
 	}
 
 	/**
@@ -567,7 +795,9 @@ class Database {
 			cntaccess bigint(20) NOT NULL,
 			blog_id bigint(20) NOT NULL DEFAULT '1',
 			PRIMARY KEY  (postnumber, blog_id),
-			KEY idx_blog_id (blog_id)
+			KEY idx_blog_id (blog_id),
+			KEY idx_cntaccess (cntaccess),
+			KEY idx_blog_cntaccess (blog_id, cntaccess)
 		) $charset_collate;";
 
 		return $sql;
@@ -735,6 +965,7 @@ class Database {
 				)
 			);
 			if ( false === $result ) {
+				self::clear_table_installation_cache();
 				return false;
 			}
 			$rows += (int) $result;
@@ -752,6 +983,7 @@ class Database {
 				)
 			);
 			if ( false === $result ) {
+				self::clear_table_installation_cache();
 				return false;
 			}
 			$rows += (int) $result;
@@ -776,7 +1008,7 @@ class Database {
 		global $wpdb;
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
-		return $wpdb->insert(
+		$result = $wpdb->insert(
 			self::get_funnel_table(),
 			array(
 				'postnumber'       => absint( $post_id ),
@@ -787,22 +1019,38 @@ class Database {
 			),
 			array( '%d', '%d', '%s', '%d', '%d' )
 		);
+
+		if ( false === $result ) {
+			self::clear_table_installation_cache();
+		}
+
+		return $result;
 	}
 
 	/**
 	 * Drain the funnel into the log and count tables, then empty the funnel.
 	 *
-	 * All four operations (copy to log, aggregate to daily, aggregate to overall,
-	 * delete from funnel) run inside one transaction. A failure rolls back cleanly
-	 * and the next run retries the same rows with no double-counting risk.
+	 * Each of the four steps (copy to log, aggregate to daily, aggregate to overall,
+	 * delete from funnel) commits independently rather than inside one app-level
+	 * transaction. wpdb silently reconnects and retries a query if the DB connection
+	 * drops mid-request, which would otherwise void an in-flight transaction and let
+	 * later steps (e.g. the funnel delete) commit on a fresh connection while earlier
+	 * ones were rolled back — losing visits with no error. Without a wrapping
+	 * transaction, a crash between steps can at worst cause one batch to be
+	 * re-aggregated (a bounded, self-correcting over-count), never a silent loss.
 	 *
 	 * @since 4.3.0
 	 *
-	 * @param int $batch_size Maximum funnel rows to process per run.
+	 * @param int      $batch_size Maximum funnel rows to process per run.
+	 * @param int|null $blog_id   Optional blog ID. When set, only that site's buffered visits are processed.
 	 * @return true|false|int|\WP_Error True if rows processed, false if lock not acquired, 0 if funnel empty, WP_Error on DB failure.
 	 */
-	public static function aggregate_visit_log( $batch_size = 10000 ) {
+	public static function aggregate_visit_log( $batch_size = 10000, $blog_id = null ) {
 		global $wpdb;
+
+		$batch_size = max( 1, absint( $batch_size ) );
+		$blog_id    = null === $blog_id ? null : absint( $blog_id );
+		$blog_where = null === $blog_id ? '' : $wpdb->prepare( ' AND blog_id = %d', $blog_id );
 
 		// Detect SQLite (e.g. WordPress Playground) vs MySQL/MariaDB.
 		// DATABASE_TYPE is defined by the WordPress SQLite Database Integration drop-in.
@@ -814,32 +1062,23 @@ class Database {
 		$daily_table  = self::get_table( true );
 		$full_table   = self::get_table( false );
 
-		// MySQL-specific locking and transactions.
+		// GET_LOCK is a MySQL-only concurrency guard against overlapping cron runs; not needed for correctness.
 		if ( ! $is_sqlite ) {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$lock_acquired = $wpdb->get_var( "SELECT GET_LOCK('tptn_aggregation', 0)" );
 			if ( '1' !== (string) $lock_acquired ) {
 				return false;
 			}
-
-			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
-			if ( false === $wpdb->query( 'START TRANSACTION' ) ) {
-				$wpdb->query( "SELECT RELEASE_LOCK('tptn_aggregation')" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
-				return new \WP_Error( 'tptn_transaction_failed', $wpdb->last_error ? $wpdb->last_error : __( 'Could not start transaction.', 'top-10' ) );
-			}
 		}
 
 		try {
 			// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-			$max_id = (int) $wpdb->get_var( "SELECT MAX(id) FROM {$funnel_table}" );
+			$max_id = (int) $wpdb->get_var( "SELECT MAX(id) FROM {$funnel_table} WHERE 1=1{$blog_where}" );
 			if ( 0 === $max_id ) {
-				if ( ! $is_sqlite ) {
-					$wpdb->query( 'ROLLBACK' ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
-				}
 				return 0;
 			}
 
-			$cap_id     = $wpdb->get_var( $wpdb->prepare( "SELECT id FROM {$funnel_table} ORDER BY id ASC LIMIT %d, 1", $batch_size ) );
+			$cap_id     = $wpdb->get_var( $wpdb->prepare( "SELECT id FROM {$funnel_table} WHERE 1=1{$blog_where} ORDER BY id ASC LIMIT %d, 1", $batch_size ) );
 			$was_capped = false;
 			if ( null !== $cap_id ) {
 				$capped_max = (int) $cap_id - 1;
@@ -854,14 +1093,11 @@ class Database {
 					"INSERT INTO {$log_table} (postnumber, blog_id, visited_at, source)
 					 SELECT postnumber, blog_id, visited_at, source
 					 FROM   {$funnel_table}
-					 WHERE  id <= %d",
+					 WHERE  id <= %d{$blog_where}",
 					$max_id
 				)
 			);
 			if ( false === $r ) {
-				if ( ! $is_sqlite ) {
-					$wpdb->query( 'ROLLBACK' );
-				}
 				return new \WP_Error( 'tptn_log_insert_failed', $wpdb->last_error ? $wpdb->last_error : __( 'Failed to copy visits to log table.', 'top-10' ) );
 			}
 
@@ -871,16 +1107,13 @@ class Database {
 					 SELECT postnumber, COUNT(*) AS cntaccess,
 					        DATE_FORMAT(visited_at, '%%Y-%%m-%%d %%H:00:00') AS dp_date, blog_id
 					 FROM   {$funnel_table}
-					 WHERE  id <= %d AND activate_counter IN (10, 11)
+					 WHERE  id <= %d AND activate_counter IN (10, 11){$blog_where}
 					 GROUP  BY postnumber, DATE_FORMAT(visited_at, '%%Y-%%m-%%d %%H:00:00'), blog_id
 					 ON DUPLICATE KEY UPDATE cntaccess = {$daily_table}.cntaccess + VALUES(cntaccess)",
 					$max_id
 				)
 			);
 			if ( false === $r ) {
-				if ( ! $is_sqlite ) {
-					$wpdb->query( 'ROLLBACK' );
-				}
 				return new \WP_Error( 'tptn_daily_insert_failed', $wpdb->last_error ? $wpdb->last_error : __( 'Failed to aggregate visits into daily table.', 'top-10' ) );
 			}
 
@@ -889,34 +1122,34 @@ class Database {
 					"INSERT INTO {$full_table} (postnumber, cntaccess, blog_id)
 					 SELECT postnumber, COUNT(*) AS cntaccess, blog_id
 					 FROM   {$funnel_table}
-					 WHERE  id <= %d AND activate_counter IN (1, 11)
+					 WHERE  id <= %d AND activate_counter IN (1, 11){$blog_where}
 					 GROUP  BY postnumber, blog_id
 					 ON DUPLICATE KEY UPDATE cntaccess = {$full_table}.cntaccess + VALUES(cntaccess)",
 					$max_id
 				)
 			);
 			if ( false === $r ) {
-				if ( ! $is_sqlite ) {
-					$wpdb->query( 'ROLLBACK' );
-				}
 				return new \WP_Error( 'tptn_overall_insert_failed', $wpdb->last_error ? $wpdb->last_error : __( 'Failed to aggregate visits into overall table.', 'top-10' ) );
 			}
 
-			$r = $wpdb->query( $wpdb->prepare( "DELETE FROM {$funnel_table} WHERE id <= %d", $max_id ) );
+			$r = $wpdb->query( $wpdb->prepare( "DELETE FROM {$funnel_table} WHERE id <= %d{$blog_where}", $max_id ) );
 			if ( false === $r ) {
-				if ( ! $is_sqlite ) {
-					$wpdb->query( 'ROLLBACK' );
-				}
 				return new \WP_Error( 'tptn_funnel_delete_failed', $wpdb->last_error ? $wpdb->last_error : __( 'Failed to drain funnel table.', 'top-10' ) );
 			}
 			// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
-			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
-			if ( ! $is_sqlite && false === $wpdb->query( 'COMMIT' ) ) {
-				$wpdb->query( 'ROLLBACK' ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
-				return new \WP_Error( 'tptn_commit_failed', $wpdb->last_error ? $wpdb->last_error : __( 'Transaction commit failed.', 'top-10' ) );
-			}
-
+			/**
+			 * Fires after view counts change, so caches can be invalidated.
+			 *
+			 * Bulk operations such as funnel aggregation and the daily rollup pass zeros,
+			 * signalling that many posts changed rather than one specific post.
+			 *
+			 * @since 4.2.0
+			 *
+			 * @param int  $post_id Post ID, or 0 after a bulk update.
+			 * @param int  $blog_id Blog ID, or 0 after a bulk update.
+			 * @param bool $daily   Whether the daily table was updated.
+			 */
 			do_action( 'tptn_count_updated', 0, 0, false );
 
 			if ( $was_capped && ! wp_next_scheduled( 'tptn_aggregation_cron_hook' ) ) {
@@ -1165,6 +1398,266 @@ class Database {
 	}
 
 	/**
+	 * Get the daily-table row counts before and after a rollup.
+	 *
+	 * The projected row count groups rows by post, blog, and calendar date.
+	 *
+	 * @since 4.5.0
+	 *
+	 * @param string   $before_date Rows before this date are included.
+	 * @param int|null $blog_id    Blog ID. Defaults to the current blog.
+	 * @return array|\WP_Error Rollup statistics or an error.
+	 */
+	public static function get_daily_rollup_stats( string $before_date, $blog_id = null ) {
+		global $wpdb;
+
+		$before_date = self::normalize_daily_rollup_date( $before_date );
+		if ( is_wp_error( $before_date ) ) {
+			return $before_date;
+		}
+
+		$blog_id = null === $blog_id ? get_current_blog_id() : absint( $blog_id );
+		$table   = self::get_table( true );
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$rows_before = $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT COUNT(*) FROM `{$table}` WHERE blog_id = %d AND dp_date < %s",
+				$blog_id,
+				$before_date
+			)
+		);
+		if ( null === $rows_before ) {
+			return new \WP_Error( 'tptn_rollup_count_failed', $wpdb->last_error ? $wpdb->last_error : __( 'Could not count daily rows before the rollup.', 'top-10' ) );
+		}
+
+		$rows_after = $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT COUNT(*) FROM (
+					SELECT postnumber, blog_id, DATE(dp_date) AS rollup_date
+					FROM `{$table}`
+					WHERE blog_id = %d AND dp_date < %s
+					GROUP BY postnumber, blog_id, DATE(dp_date)
+				) AS rollup_groups",
+				$blog_id,
+				$before_date
+			)
+		);
+		if ( null === $rows_after ) {
+			return new \WP_Error( 'tptn_rollup_projection_failed', $wpdb->last_error ? $wpdb->last_error : __( 'Could not calculate the projected daily row count.', 'top-10' ) );
+		}
+
+		$dates = $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT COUNT(DISTINCT DATE(dp_date)) FROM `{$table}` WHERE blog_id = %d AND dp_date < %s",
+				$blog_id,
+				$before_date
+			)
+		);
+		if ( null === $dates ) {
+			return new \WP_Error( 'tptn_rollup_dates_failed', $wpdb->last_error ? $wpdb->last_error : __( 'Could not count daily rollup dates.', 'top-10' ) );
+		}
+		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+		return array(
+			'rows_before'  => (int) $rows_before,
+			'rows_after'   => (int) $rows_after,
+			'rows_reduced' => max( 0, (int) $rows_before - (int) $rows_after ),
+			'dates'        => (int) $dates,
+		);
+	}
+
+	/**
+	 * Roll up hourly daily rows older than a date into one midnight row per post.
+	 *
+	 * Each calendar date is processed in its own transaction so an interrupted
+	 * operation can safely resume on the next date. The overall count table is
+	 * never modified.
+	 *
+	 * @since 4.5.0
+	 *
+	 * @param string   $before_date Rows before this date are rolled up.
+	 * @param int|null $blog_id    Blog ID. Defaults to the current blog.
+	 * @return array|\WP_Error Rollup statistics or an error.
+	 */
+	public static function rollup_daily( string $before_date, $blog_id = null ) {
+		global $wpdb;
+
+		$before_date = self::normalize_daily_rollup_date( $before_date );
+		if ( is_wp_error( $before_date ) ) {
+			return $before_date;
+		}
+
+		$blog_id = null === $blog_id ? get_current_blog_id() : absint( $blog_id );
+		$table   = self::get_table( true );
+		$before  = self::get_daily_rollup_stats( $before_date, $blog_id );
+		if ( is_wp_error( $before ) ) {
+			return $before;
+		}
+
+		$last_date       = '';
+		$dates_processed = 0;
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		while ( true ) {
+			// Select one unprocessed date at a time. Existing midnight rows are
+			// already rolled up and are therefore skipped on subsequent runs.
+			if ( '' === $last_date ) {
+				$next_date = $wpdb->get_var(
+					$wpdb->prepare(
+						"SELECT DATE(dp_date) FROM `{$table}` WHERE blog_id = %d AND dp_date < %s AND TIME(dp_date) <> '00:00:00' ORDER BY dp_date ASC LIMIT 1",
+						$blog_id,
+						$before_date
+					)
+				);
+			} else {
+				$next_date_start = ( new \DateTimeImmutable( $last_date, new \DateTimeZone( 'UTC' ) ) )->modify( '+1 day' )->format( 'Y-m-d 00:00:00' );
+				$next_date       = $wpdb->get_var(
+					$wpdb->prepare(
+						"SELECT DATE(dp_date) FROM `{$table}` WHERE blog_id = %d AND dp_date >= %s AND dp_date < %s AND TIME(dp_date) <> '00:00:00' ORDER BY dp_date ASC LIMIT 1",
+						$blog_id,
+						$next_date_start,
+						$before_date
+					)
+				);
+			}
+
+			if ( null === $next_date ) {
+				if ( ! empty( $wpdb->last_error ) ) {
+					return new \WP_Error( 'tptn_rollup_date_failed', $wpdb->last_error );
+				}
+				break;
+			}
+
+			$day_start        = $next_date . ' 00:00:00';
+			$day_end          = ( new \DateTimeImmutable( $next_date, new \DateTimeZone( 'UTC' ) ) )->modify( '+1 day' )->format( 'Y-m-d 00:00:00' );
+			$transaction_open = false;
+
+			if ( false === $wpdb->query( 'START TRANSACTION' ) ) {
+				return new \WP_Error( 'tptn_rollup_start_failed', $wpdb->last_error ? $wpdb->last_error : __( 'Could not start the daily rollup transaction.', 'top-10' ) );
+			}
+			$transaction_open = true;
+
+			try {
+				$daily_rows = $wpdb->get_results(
+					$wpdb->prepare(
+						"SELECT postnumber, cntaccess
+						 FROM `{$table}`
+						 WHERE blog_id = %d AND dp_date >= %s AND dp_date < %s
+						 ORDER BY postnumber ASC
+						 FOR UPDATE",
+						$blog_id,
+						$day_start,
+						$day_end
+					),
+					ARRAY_A
+				);
+				if ( null === $daily_rows ) {
+					return new \WP_Error( 'tptn_rollup_select_failed', $wpdb->last_error ? $wpdb->last_error : __( 'Could not read the daily rows for the rollup.', 'top-10' ) );
+				}
+
+				$rollup_counts = array();
+				foreach ( $daily_rows as $daily_row ) {
+					$postnumber = (int) $daily_row['postnumber'];
+					if ( ! isset( $rollup_counts[ $postnumber ] ) ) {
+						$rollup_counts[ $postnumber ] = 0;
+					}
+					$rollup_counts[ $postnumber ] += (int) $daily_row['cntaccess'];
+				}
+
+				foreach ( array_chunk( $rollup_counts, 500, true ) as $rollup_batch ) {
+					$values = array();
+					foreach ( $rollup_batch as $postnumber => $count ) {
+						$values[] = $wpdb->prepare(
+							'( %d, %d, %s, %d )',
+							$postnumber,
+							$count,
+							$day_start,
+							$blog_id
+						);
+					}
+
+					$result = $wpdb->query(
+						// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+						"INSERT INTO `{$table}` (postnumber, cntaccess, dp_date, blog_id) VALUES " . implode( ',', $values ) . ' ON DUPLICATE KEY UPDATE cntaccess = VALUES(cntaccess)'
+					);
+					if ( false === $result ) {
+						return new \WP_Error( 'tptn_rollup_insert_failed', $wpdb->last_error ? $wpdb->last_error : __( 'Could not write the daily rollup.', 'top-10' ) );
+					}
+				}
+
+				$result = $wpdb->query(
+					$wpdb->prepare(
+						"DELETE FROM `{$table}` WHERE blog_id = %d AND dp_date >= %s AND dp_date < %s AND dp_date <> %s",
+						$blog_id,
+						$day_start,
+						$day_end,
+						$day_start
+					)
+				);
+				if ( false === $result ) {
+					return new \WP_Error( 'tptn_rollup_delete_failed', $wpdb->last_error ? $wpdb->last_error : __( 'Could not remove the hourly daily rows.', 'top-10' ) );
+				}
+
+				if ( false === $wpdb->query( 'COMMIT' ) ) {
+					return new \WP_Error( 'tptn_rollup_commit_failed', $wpdb->last_error ? $wpdb->last_error : __( 'Could not commit the daily rollup.', 'top-10' ) );
+				}
+				$transaction_open = false;
+			} finally {
+				if ( $transaction_open ) {
+					$wpdb->query( 'ROLLBACK' );
+				}
+			}
+			++$dates_processed;
+			$last_date = $next_date;
+		}
+		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+		$after = self::get_daily_rollup_stats( $before_date, $blog_id );
+		if ( is_wp_error( $after ) ) {
+			return $after;
+		}
+
+		if ( $dates_processed > 0 ) {
+			/** This action is documented in includes/class-database.php */
+			do_action( 'tptn_count_updated', 0, 0, false );
+		}
+
+		return array(
+			'rows_before'     => $before['rows_before'],
+			'rows_after'      => $after['rows_before'],
+			'rows_reduced'    => max( 0, $before['rows_before'] - $after['rows_before'] ),
+			'dates'           => $after['dates'],
+			'dates_processed' => $dates_processed,
+		);
+	}
+
+	/**
+	 * Normalize a rollup boundary to midnight.
+	 *
+	 * @since 4.5.0
+	 *
+	 * @param string $before_date Rollup boundary in Y-m-d or Y-m-d 00:00:00 format.
+	 * @return string|\WP_Error Normalized date or an error.
+	 */
+	private static function normalize_daily_rollup_date( string $before_date ) {
+		$before_date = trim( $before_date, " \t\n\r\0\x0B" );
+		$date        = preg_replace( '/ 00:00:00$/', '', $before_date );
+
+		if ( ! is_string( $date ) || ! preg_match( '/^\d{4}-\d{2}-\d{2}$/', $date ) ) {
+			return new \WP_Error( 'tptn_invalid_rollup_date', __( 'The daily rollup boundary must be a valid date in Y-m-d format.', 'top-10' ) );
+		}
+
+		$date_object = \DateTimeImmutable::createFromFormat( '!Y-m-d', $date, new \DateTimeZone( 'UTC' ) );
+		$errors      = \DateTimeImmutable::getLastErrors();
+		if ( false === $date_object || ( is_array( $errors ) && ( $errors['warning_count'] > 0 || $errors['error_count'] > 0 ) ) ) {
+			return new \WP_Error( 'tptn_invalid_rollup_date', __( 'The daily rollup boundary must be a valid date in Y-m-d format.', 'top-10' ) );
+		}
+
+		return $date_object->format( 'Y-m-d 00:00:00' );
+	}
+
+	/**
 	 * Count rows in the visits log table older than a given datetime.
 	 *
 	 * @since 4.3.0
@@ -1223,12 +1716,24 @@ class Database {
 	public static function count_orphan_counts( string $table_name ): int {
 		global $wpdb;
 		$blog_id = get_current_blog_id();
+		/**
+		 * Filters the reserved post IDs used to store site-wide view counts.
+		 *
+		 * @since 4.5.0
+		 *
+		 * @param int[] $context_ids Reserved context IDs. Default empty array.
+		 */
+		$context_ids   = array_map( 'intval', (array) apply_filters( 'tptn_sitewide_context_ids', array() ) );
+		$context_where = '';
+		if ( $context_ids ) {
+			$context_where = ' AND t.postnumber NOT IN (' . implode( ',', $context_ids ) . ')';
+		}
 		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		return (int) $wpdb->get_var(
 			$wpdb->prepare(
 				"SELECT COUNT(*) FROM `{$table_name}` t
 				 LEFT JOIN `{$wpdb->posts}` p ON t.postnumber = p.ID
-				 WHERE p.ID IS NULL AND t.blog_id = %d",
+				 WHERE p.ID IS NULL AND t.blog_id = %d{$context_where}",
 				$blog_id
 			)
 		);
@@ -1250,12 +1755,18 @@ class Database {
 	public static function delete_orphan_counts( string $table_name, int $batch_size = 1000 ) {
 		global $wpdb;
 		$blog_id = get_current_blog_id();
+		/** This filter is documented in includes/class-database.php */
+		$context_ids   = array_map( 'intval', (array) apply_filters( 'tptn_sitewide_context_ids', array() ) );
+		$context_where = '';
+		if ( $context_ids ) {
+			$context_where = ' AND t.postnumber NOT IN (' . implode( ',', $context_ids ) . ')';
+		}
 		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		return $wpdb->query(
 			$wpdb->prepare(
 				"DELETE t FROM `{$table_name}` t
 				 LEFT JOIN `{$wpdb->posts}` p ON t.postnumber = p.ID
-				 WHERE p.ID IS NULL AND t.blog_id = %d
+				 WHERE p.ID IS NULL AND t.blog_id = %d{$context_where}
 				 LIMIT %d",
 				$blog_id,
 				$batch_size
