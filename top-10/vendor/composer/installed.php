@@ -3,7 +3,7 @@
         'name' => 'webberzone/top-10',
         'pretty_version' => 'dev-master',
         'version' => 'dev-master',
-        'reference' => '3864c51bdc95c398b2f431820c1f0e8651110412',
+        'reference' => '411922ecb9c6b1a23c31c2acc1a504dc5edd9ce8',
         'type' => 'wordpress-plugin',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -31,7 +31,7 @@
         'webberzone/top-10' => array(
             'pretty_version' => 'dev-master',
             'version' => 'dev-master',
-            'reference' => '3864c51bdc95c398b2f431820c1f0e8651110412',
+            'reference' => '411922ecb9c6b1a23c31c2acc1a504dc5edd9ce8',
             'type' => 'wordpress-plugin',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),
