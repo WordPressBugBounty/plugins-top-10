@@ -3,7 +3,7 @@
         'name' => 'webberzone/top-10',
         'pretty_version' => 'dev-master',
         'version' => 'dev-master',
-        'reference' => '411922ecb9c6b1a23c31c2acc1a504dc5edd9ce8',
+        'reference' => '00da8645c6b20d5f0b6385710bba9626fb3b0131',
         'type' => 'wordpress-plugin',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -11,9 +11,9 @@
     ),
     'versions' => array(
         'freemius/wordpress-sdk' => array(
-            'pretty_version' => '2.13.4',
-            'version' => '2.13.4.0',
-            'reference' => 'fa43eb92ae9dffa0d9f5ae11b5a1739bd7222308',
+            'pretty_version' => '2.13.5',
+            'version' => '2.13.5.0',
+            'reference' => null,
             'type' => 'library',
             'install_path' => __DIR__ . '/../freemius/wordpress-sdk',
             'aliases' => array(),
@@ -31,7 +31,7 @@
         'webberzone/top-10' => array(
             'pretty_version' => 'dev-master',
             'version' => 'dev-master',
-            'reference' => '411922ecb9c6b1a23c31c2acc1a504dc5edd9ce8',
+            'reference' => '00da8645c6b20d5f0b6385710bba9626fb3b0131',
             'type' => 'wordpress-plugin',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),

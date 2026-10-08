@@ -83,9 +83,17 @@ class REST_API extends \WP_REST_Controller {
 				'callback'            => array( $this, 'get_item' ),
 				'permission_callback' => array( $this, 'permissions_check' ),
 				'args'                => array(
-					'id' => array(
+					'id'   => array(
 						'description' => __( 'Post ID.', 'top-10' ),
 						'type'        => 'integer',
+					),
+					'lang' => array(
+						'description'       => __( 'TranslatePress language code to render the response in.', 'top-10' ),
+						'type'              => 'string',
+						'sanitize_callback' => 'sanitize_text_field',
+						'validate_callback' => static function ( $value ) {
+							return is_string( $value ) && strlen( $value ) <= 20;
+						},
 					),
 				),
 			)
@@ -153,6 +161,9 @@ class REST_API extends \WP_REST_Controller {
 		$popular_posts = array();
 
 		$args = $request->get_params();
+
+		// Transport-only: the language must not reach the query or its cache key.
+		unset( $args['lang'] );
 
 		/**
 		 * Filter the REST API arguments before they passed to get_tptn_posts().
@@ -331,6 +342,14 @@ class REST_API extends \WP_REST_Controller {
 				'type'        => 'string',
 				'enum'        => array( 'view', 'embed', 'edit' ),
 				'default'     => 'view',
+			),
+			'lang'       => array(
+				'description'       => esc_html__( 'TranslatePress language code to render the response in.', 'top-10' ),
+				'type'              => 'string',
+				'sanitize_callback' => 'sanitize_text_field',
+				'validate_callback' => static function ( $value ) {
+					return is_string( $value ) && strlen( $value ) <= 20;
+				},
 			),
 		);
 
