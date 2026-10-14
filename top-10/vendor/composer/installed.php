@@ -1,9 +1,9 @@
 <?php return array(
     'root' => array(
         'name' => 'webberzone/top-10',
-        'pretty_version' => 'dev-master',
-        'version' => 'dev-master',
-        'reference' => '00da8645c6b20d5f0b6385710bba9626fb3b0131',
+        'pretty_version' => '4.5.3.x-dev',
+        'version' => '4.5.3.9999999-dev',
+        'reference' => 'afe3f3f132d2a6dde5befaf156e8f34cce0ea7d2',
         'type' => 'wordpress-plugin',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -29,9 +29,9 @@
             'dev_requirement' => false,
         ),
         'webberzone/top-10' => array(
-            'pretty_version' => 'dev-master',
-            'version' => 'dev-master',
-            'reference' => '00da8645c6b20d5f0b6385710bba9626fb3b0131',
+            'pretty_version' => '4.5.3.x-dev',
+            'version' => '4.5.3.9999999-dev',
+            'reference' => 'afe3f3f132d2a6dde5befaf156e8f34cce0ea7d2',
             'type' => 'wordpress-plugin',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),
