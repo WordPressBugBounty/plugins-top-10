@@ -9,6 +9,7 @@ namespace WebberZone\Top_Ten;
 
 use WebberZone\Top_Ten\Database;
 use WebberZone\Top_Ten\Frontend\Display;
+use WebberZone\Top_Ten\Integrations\Koko_Analytics;
 use WebberZone\Top_Ten\Util\Helpers;
 use WebberZone\Top_Ten\Util\Hook_Registry;
 
@@ -23,6 +24,13 @@ if ( ! defined( 'WPINC' ) ) {
  * @since 4.0.0
  */
 class Top_Ten_Core_Query extends \WP_Query {
+
+	/**
+	 * Placeholder for each site's counts table in network lists.
+	 *
+	 * @since 4.6.0
+	 */
+	const NETWORK_COUNTS_TOKEN = '/*tptn_network_counts*/';
 
 	/**
 	 * Array of blog IDs.
@@ -87,6 +95,22 @@ class Top_Ten_Core_Query extends \WP_Query {
 	 * @var string
 	 */
 	public $table_name;
+
+	/**
+	 * Count-table conditions used by the daily aggregation.
+	 *
+	 * @since 4.6.0
+	 * @var string
+	 */
+	private $daily_where = '';
+
+	/**
+	 * Whether counts are read from Koko Analytics.
+	 *
+	 * @since 4.6.0
+	 * @var bool
+	 */
+	public $use_koko = false;
 
 	/**
 	 * Stores the SELECT clauses in WordPress multisite.
@@ -208,11 +232,34 @@ class Top_Ten_Core_Query extends \WP_Query {
 
 		// Parse the blog_id argument to get an array of IDs.
 		$this->blog_id = wp_parse_id_list( $args['blog_id'] );
+
+		/**
+		 * Filters whether popular posts lists may include other sites in the network.
+		 *
+		 * @since 4.6.0
+		 *
+		 * @param bool  $allow Whether to allow lists across sites. Default false.
+		 * @param array $args  Query arguments.
+		 */
+		if ( is_multisite() && ! apply_filters( 'tptn_allow_network_queries', false, $args ) ) {
+			$this->blog_id = array( get_current_blog_id() );
+		}
+
 		if ( is_multisite() ) {
 			if ( count( $this->blog_id ) > 1 || ( 1 === count( $this->blog_id ) && get_current_blog_id() !== (int) $this->blog_id[0] ) ) {
 				$this->multiple_blogs = true;
 			}
 		}
+
+		/**
+		 * Filters whether this query reads its counts from Koko Analytics.
+		 *
+		 * @since 4.6.0
+		 *
+		 * @param bool  $use_koko Whether to use Koko Analytics. Sites in a network list without Koko Analytics use Top 10.
+		 * @param array $args     Query arguments.
+		 */
+		$this->use_koko = (bool) apply_filters( 'tptn_query_use_koko_analytics', Koko_Analytics::is_source(), $args );
 
 		// Set the number of posts to be retrieved with over-fetch buffer for PHP exclusions.
 		$requested_limit = (int) $args['limit'];
@@ -351,19 +398,22 @@ class Top_Ten_Core_Query extends \WP_Query {
 
 		$args['tax_query'] = $tax_query; // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_tax_query
 
+		$generated_date_query = null;
+
 		// Set date_query.
 		if ( ! empty( $args['date_query'] ) && is_array( $args['date_query'] ) ) {
 			// If date_query is already provided, use it as-is.
 			$date_query = $args['date_query'];
 		} else {
 			// Create date_query from how_old parameter.
-			$date_query = array(
+			$date_query           = array(
 				array(
 					'after'     => $args['how_old'] ? Helpers::get_from_date( null, $args['how_old'] + 1, 0 ) : '',
 					'before'    => current_time( 'mysql' ),
 					'inclusive' => true,
 				),
 			);
+			$generated_date_query = $date_query;
 		}
 
 		/**
@@ -446,7 +496,12 @@ class Top_Ten_Core_Query extends \WP_Query {
 
 		if ( $this->should_cache() && ! $this->in_cache ) {
 			// Handle exclude_current_post by adding current_post_id for cache key consistency.
-			$cache_args = $this->query_args;
+			$cache_args                         = $this->query_args;
+			$cache_args['_tptn_cache_blog_ids'] = $this->blog_id;
+			$cache_args['_tptn_data_source']    = $this->use_koko ? 'koko' : 'top10';
+			if ( null !== $generated_date_query && $generated_date_query === $cache_args['date_query'] ) {
+				unset( $cache_args['date_query'][0]['before'] );
+			}
 			if ( ! empty( $cache_args['exclude_current_post'] ) ) {
 				$cache_args['current_post_id'] = (int) get_the_ID();
 			}
@@ -505,7 +560,7 @@ class Top_Ten_Core_Query extends \WP_Query {
 		}
 
 		$_fields[] = "{$this->table_name}.postnumber";
-		$_fields[] = $this->is_daily ? "SUM({$this->table_name}.cntaccess) as visits" : "{$this->table_name}.cntaccess as visits";
+		$_fields[] = $this->is_daily && ! $this->use_koko ? "SUM({$this->table_name}.cntaccess) as visits" : "{$this->table_name}.cntaccess as visits";
 		$_fields[] = "{$this->table_name}.blog_id";
 
 		$_fields = implode( ', ', $_fields );
@@ -544,7 +599,13 @@ class Top_Ten_Core_Query extends \WP_Query {
 			return $join;
 		}
 
-		$join .= " INNER JOIN {$this->table_name} ON {$this->table_name}.postnumber={$wpdb->posts}.ID ";
+		if ( $this->use_koko ) {
+			// Network lists swap in each site's counts table in posts_clauses().
+			$counts = $this->multiple_blogs ? self::NETWORK_COUNTS_TOKEN : '(' . $this->get_counts_sql( get_current_blog_id() ) . ')';
+			$join  .= " INNER JOIN {$counts} AS {$this->table_name} ON {$this->table_name}.postnumber={$wpdb->posts}.ID ";
+		} else {
+			$join .= " INNER JOIN {$this->table_name} ON {$this->table_name}.postnumber={$wpdb->posts}.ID ";
+		}
 
 		/**
 		 * Filters the JOIN clause of Top_Ten_Core_Query.
@@ -578,23 +639,24 @@ class Top_Ten_Core_Query extends \WP_Query {
 			return $where;
 		}
 
-		if ( ! $this->multiple_blogs ) {
-			$where .= " AND {$this->table_name}.blog_id IN ('" . join( "', '", $this->blog_id ) . "') "; // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$count_where = '';
+
+		if ( ! $this->multiple_blogs && ! $this->use_koko ) {
+			$count_where .= " AND {$this->table_name}.blog_id IN ('" . join( "', '", $this->blog_id ) . "') "; // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		}
 
-		if ( $this->is_daily ) {
-			if ( isset( $this->query_args['from_date'] ) ) {
-				$from_date = Helpers::get_from_date( $this->query_args['from_date'], 0, 0 );
-			} else {
-				$from_date = Helpers::get_from_date( null, $this->query_args['daily_range'], $this->query_args['hour_range'] );
-			}
-			$where .= $wpdb->prepare( " AND {$this->table_name}.dp_date >= %s ", $from_date ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		if ( $this->is_daily && ! $this->use_koko ) {
+			list( $from_date, $to_date ) = $this->get_count_date_range();
 
-			if ( isset( $this->query_args['to_date'] ) ) {
-				$to_date = Helpers::get_from_date( $this->query_args['to_date'], 0, 0 );
-				$where  .= $wpdb->prepare( " AND {$this->table_name}.dp_date <= %s ", $to_date ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$count_where .= $wpdb->prepare( " AND {$this->table_name}.dp_date >= %s ", $from_date ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+			if ( $to_date ) {
+				$count_where .= $wpdb->prepare( " AND {$this->table_name}.dp_date <= %s ", $to_date ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
 			}
 		}
+
+		$this->daily_where = $count_where;
+		$where            .= $count_where;
 
 		/**
 		 * Filters the WHERE clause of Top_Ten_Core_Query.
@@ -609,6 +671,59 @@ class Top_Ten_Core_Query extends \WP_Query {
 		remove_filter( 'posts_where', array( $this, 'posts_where' ) );
 
 		return $where;
+	}
+
+	/**
+	 * Get the date range for period counts.
+	 *
+	 * @since 4.6.0
+	 *
+	 * @return string[] From and to dates. Both empty for overall counts; the to date is empty when unbounded.
+	 */
+	private function get_count_date_range() {
+		if ( ! $this->is_daily ) {
+			return array( '', '' );
+		}
+
+		if ( isset( $this->query_args['from_date'] ) ) {
+			$from_date = Helpers::get_from_date( $this->query_args['from_date'], 0, 0, false );
+		} else {
+			$from_date = Helpers::get_from_date( null, $this->query_args['daily_range'], $this->query_args['hour_range'], $this->query_args['daily_midnight'] ?? null );
+		}
+
+		$to_date = isset( $this->query_args['to_date'] ) ? Helpers::get_from_date( $this->query_args['to_date'], 0, 0, false ) : '';
+
+		return array( $from_date, $to_date );
+	}
+
+	/**
+	 * Build a site's counts table for Koko Analytics mode, using Top 10 counts when Koko Analytics is not available on that site.
+	 *
+	 * @since 4.6.0
+	 *
+	 * @param int $blog_id Blog ID.
+	 * @return string SELECT statement exposing postnumber, cntaccess and blog_id.
+	 */
+	private function get_counts_sql( $blog_id ) {
+		global $wpdb;
+
+		list( $from_date, $to_date ) = $this->get_count_date_range();
+
+		if ( Koko_Analytics::is_available( $blog_id ) ) {
+			return Koko_Analytics::get_counts_sql( $from_date, $to_date, $blog_id );
+		}
+
+		$table = Database::get_table( $this->is_daily );
+		if ( ! $this->is_daily ) {
+			return $wpdb->prepare( 'SELECT postnumber, cntaccess, blog_id FROM %i WHERE blog_id = %d', $table, $blog_id );
+		}
+
+		$sql = $wpdb->prepare( 'SELECT postnumber, SUM(cntaccess) AS cntaccess, blog_id FROM %i WHERE blog_id = %d AND dp_date >= %s', $table, $blog_id, $from_date );
+		if ( $to_date ) {
+			$sql .= $wpdb->prepare( ' AND dp_date <= %s', $to_date );
+		}
+
+		return $sql . ' GROUP BY postnumber, blog_id';
 	}
 
 	/**
@@ -669,7 +784,7 @@ class Top_Ten_Core_Query extends \WP_Query {
 			return $groupby;
 		}
 
-		if ( $this->is_daily ) {
+		if ( $this->is_daily && ! $this->use_koko ) {
 			$groupby = " {$this->table_name}.postnumber ";
 		}
 
@@ -704,29 +819,37 @@ class Top_Ten_Core_Query extends \WP_Query {
 			return $clauses;
 		}
 
+		global $wpdb;
+
+		if ( ! $this->multiple_blogs ) {
+			$clauses = $this->aggregate_daily_clauses( $clauses, $query, get_current_blog_id() );
+		}
+
 		$this->ms_select = array();
 
 		if ( $this->multiple_blogs ) {
-			global $wpdb;
-
 			$root_site_db_prefix = $wpdb->prefix;
 
 			foreach ( $this->blog_id as $blog_id ) {
+				$blog_clauses = $this->aggregate_daily_clauses( $clauses, $query, $blog_id );
 				switch_to_blog( $blog_id );
 
 				$ms_select  = "
-						SELECT {$clauses['fields']}
-						FROM {$root_site_db_prefix}posts {$clauses['join']}
-						WHERE 1=1 {$clauses['where']}
+						SELECT {$blog_clauses['fields']}
+						FROM {$root_site_db_prefix}posts {$blog_clauses['join']}
+						WHERE 1=1 {$blog_clauses['where']}
 					";
 				$ms_select .= $wpdb->prepare( " AND {$this->table_name}.blog_id = %d", $blog_id ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
-				if ( $this->is_daily ) {
+				if ( $this->is_daily && ! $this->use_koko ) {
 					$ms_select .= " GROUP BY {$this->table_name}.postnumber ";
 				}
 
 				$ms_select = str_replace( $root_site_db_prefix, $wpdb->prefix, $ms_select );
 				$ms_select = str_replace( "{$wpdb->prefix}top_ten", "{$wpdb->base_prefix}top_ten", $ms_select );
+				if ( $this->use_koko ) {
+					$ms_select = str_replace( self::NETWORK_COUNTS_TOKEN, '(' . $this->get_counts_sql( $blog_id ) . ')', $ms_select );
+				}
 
 				$this->ms_select[] = $ms_select;
 
@@ -738,6 +861,7 @@ class Top_Ten_Core_Query extends \WP_Query {
 			$clauses['where']   = '';
 			$clauses['join']    = '';
 			$clauses['groupby'] = '';
+			$clauses['orderby'] = str_replace( array( $this->table_name . '.', $wpdb->posts . '.' ), 'tables.', $clauses['orderby'] );
 		}
 
 		/**
@@ -749,7 +873,77 @@ class Top_Ten_Core_Query extends \WP_Query {
 		 * @param Top_Ten_Core_Query $query    The Top_Ten_Core_Query instance (passed by reference).
 		 */
 		$clauses = apply_filters_ref_array( 'top_ten_query_posts_clauses', array( $clauses, &$this ) );
+		Hook_Registry::remove_filter( 'posts_clauses', array( $this, 'posts_clauses' ), 20 );
 
+		return $clauses;
+	}
+
+	/**
+	 * Aggregate daily rows before loading posts when the count clauses are unchanged.
+	 *
+	 * @since 4.6.0
+	 * @param array     $clauses Query clauses.
+	 * @param \WP_Query $query Query instance.
+	 * @param int       $blog_id Site whose counts are being queried.
+	 * @return array Query clauses.
+	 */
+	private function aggregate_daily_clauses( $clauses, $query, $blog_id ) {
+		global $wpdb;
+
+		if ( ! $this->is_daily || $this->use_koko ) {
+			return $clauses;
+		}
+		foreach ( array( 'fields', 'join', 'where', 'groupby', 'orderby', 'clauses' ) as $clause ) {
+			if ( has_filter( 'top_ten_query_posts_' . $clause ) ) {
+				return $clauses;
+			}
+		}
+
+		$daily_fields = "{$wpdb->posts}.*,{$this->table_name}.postnumber, SUM({$this->table_name}.cntaccess) as visits, {$this->table_name}.blog_id";
+		$daily_join   = " INNER JOIN {$this->table_name} ON {$this->table_name}.postnumber={$wpdb->posts}.ID ";
+		$outer_where  = str_replace( $this->daily_where, '', $clauses['where'], $replacements );
+		$other_joins  = str_replace( $daily_join, '', $clauses['join'], $join_replacements );
+
+		if (
+			1 !== $replacements || 1 !== $join_replacements || $daily_fields !== $clauses['fields']
+			|| trim( $clauses['groupby'], " \n\r\t\v\x00" ) !== "{$this->table_name}.postnumber"
+			|| false !== strpos( $outer_where . $other_joins, $this->table_name )
+		) {
+			return $clauses;
+		}
+
+		$count_where = $this->daily_where;
+		if ( $this->multiple_blogs ) {
+			$count_where .= $wpdb->prepare( " AND {$this->table_name}.blog_id = %d", $blog_id ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		}
+		$post_id = absint( $query->get( 'p' ) ? $query->get( 'p' ) : $query->get( 'page_id' ) );
+		if ( $post_id && false !== strpos( $outer_where, " AND {$wpdb->posts}.ID = $post_id" ) ) {
+			$count_where .= $wpdb->prepare( " AND {$this->table_name}.postnumber = %d", $post_id ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		}
+		$post_ids = wp_parse_id_list( $query->get( 'post__in' ) );
+		sort( $post_ids, SORT_NUMERIC );
+		if ( $post_ids ) {
+			$post_list = implode( ',', $post_ids );
+			if ( false !== strpos( $outer_where, " AND {$wpdb->posts}.ID IN ($post_list)" ) ) {
+				$placeholders = implode( ',', array_fill( 0, count( $post_ids ), '%d' ) );
+				$count_where .= $wpdb->prepare( " AND {$this->table_name}.postnumber IN ($placeholders)", $post_ids ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
+			}
+		}
+
+		if ( '' !== trim( $other_joins, " \n\r\t\v\x00" ) && ! ( $this->should_cache() && get_transient( $this->cache_name ) ) ) {
+			$probe_sql = "SELECT DISTINCT {$wpdb->posts}.ID FROM {$wpdb->posts} $other_joins WHERE 1=1 $outer_where LIMIT 501";
+			if ( $this->multiple_blogs ) {
+				$probe_sql = str_replace( $wpdb->prefix, $wpdb->get_blog_prefix( $blog_id ), $probe_sql );
+			}
+			$eligible_ids = $wpdb->get_col( $probe_sql ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared
+			if ( ! $wpdb->last_error && count( $eligible_ids ) < 501 ) {
+				$count_where .= " AND {$this->table_name}.postnumber IN (SELECT {$wpdb->posts}.ID FROM {$wpdb->posts} $other_joins WHERE 1=1 $outer_where)";
+			}
+		}
+
+		$aggregate_join   = " INNER JOIN (SELECT postnumber, blog_id, SUM(cntaccess) AS cntaccess FROM {$this->table_name} WHERE 1=1 $count_where GROUP BY postnumber, blog_id) AS {$this->table_name} ON {$this->table_name}.postnumber={$wpdb->posts}.ID ";
+		$clauses['join']  = str_replace( $daily_join, $aggregate_join, $clauses['join'] );
+		$clauses['where'] = $outer_where;
 		return $clauses;
 	}
 
@@ -790,7 +984,7 @@ class Top_Ten_Core_Query extends \WP_Query {
 		 */
 		$sql = apply_filters_ref_array( 'top_ten_query_posts_request', array( $sql, &$this ) );
 
-		remove_filter( 'posts_request', array( $this, 'posts_request' ) );
+		Hook_Registry::remove_filter( 'posts_request', array( $this, 'posts_request' ), 20 );
 
 		return $sql;
 	}
@@ -847,8 +1041,8 @@ class Top_Ten_Core_Query extends \WP_Query {
 
 			$post_ids = get_transient( $cache_name );
 
-			if ( ! empty( $post_ids ) ) {
-				$posts                = get_posts(
+			if ( ! empty( $post_ids ) && ( ! $this->multiple_blogs || isset( $post_ids['sites'] ) ) ) {
+				$posts                = $this->multiple_blogs ? $this->get_cached_network_posts( $post_ids['sites'], $query ) : get_posts(
 					array(
 						'post__in'    => array_unique( $post_ids ),
 						'fields'      => $query->get( 'fields' ),
@@ -901,6 +1095,19 @@ class Top_Ten_Core_Query extends \WP_Query {
 			$cache_time = apply_filters( 'tptn_cache_time', $this->query_args['cache_time'], $this->query_args );
 			$cache_name = $this->cache_name;
 			$post_ids   = wp_list_pluck( $query->posts, 'ID' );
+			if ( $this->multiple_blogs ) {
+				$post_ids = array( 'sites' => array() );
+				foreach ( $query->posts as $post ) {
+					if ( ! ( $post instanceof \WP_Post ) || ! isset( $post->blog_id, $post->visits ) ) {
+						continue;
+					}
+					$post_ids['sites'][] = array(
+						'ID'      => $post->ID,
+						'blog_id' => (int) $post->blog_id,
+						'visits'  => (int) $post->visits,
+					);
+				}
+			}
 
 			set_transient( $cache_name, $post_ids, $cache_time );
 		}
@@ -938,6 +1145,58 @@ class Top_Ten_Core_Query extends \WP_Query {
 
 		remove_filter( 'the_posts', array( $this, 'the_posts' ) );
 
+		return $posts;
+	}
+
+	/**
+	 * Hydrate cached network rankings in their source sites and original order.
+	 *
+	 * @param array     $entries Ranked post identities and counts.
+	 * @param \WP_Query $query Query being hydrated.
+	 * @return \WP_Post[] Cached posts.
+	 */
+	private function get_cached_network_posts( $entries, $query ) {
+		$groups = array();
+		$found  = array();
+		foreach ( $entries as $entry ) {
+			$groups[ $entry['blog_id'] ][] = $entry['ID'];
+		}
+		foreach ( $groups as $blog_id => $ids ) {
+			switch_to_blog( $blog_id );
+			try {
+				$posts = get_posts(
+					array(
+						'post__in'    => array_unique( $ids ),
+						'orderby'     => 'post__in',
+						'post_type'   => $query->get( 'post_type' ),
+						'post_status' => $query->get( 'post_status' ),
+						'numberposts' => count( $ids ),
+					)
+				);
+				foreach ( $posts as $post ) {
+					$found[ $blog_id . ':' . $post->ID ] = $post;
+				}
+			} finally {
+				restore_current_blog();
+			}
+		}
+		$posts = array();
+		foreach ( $entries as $entry ) {
+			$key = $entry['blog_id'] . ':' . $entry['ID'];
+			if ( isset( $found[ $key ] ) ) {
+				$post    = new \WP_Post(
+					(object) array_merge(
+						$found[ $key ]->to_array(),
+						array(
+							'blog_id'    => $entry['blog_id'],
+							'visits'     => $entry['visits'],
+							'postnumber' => $entry['ID'],
+						)
+					)
+				);
+				$posts[] = $post;
+			}
+		}
 		return $posts;
 	}
 

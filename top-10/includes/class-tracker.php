@@ -8,6 +8,7 @@
 namespace WebberZone\Top_Ten;
 
 use WebberZone\Top_Ten\Database;
+use WebberZone\Top_Ten\Integrations\Koko_Analytics;
 use WebberZone\Top_Ten\Util\Helpers;
 use WebberZone\Top_Ten\Util\Hook_Registry;
 
@@ -44,6 +45,10 @@ class Tracker {
 	public static function enqueue_scripts() {
 		global $post, $ajax_tptn_tracker;
 
+		if ( Koko_Analytics::is_tracking_disabled() ) {
+			return;
+		}
+
 		$is_singular       = is_singular();
 		$tracker_all_pages = (bool) \tptn_get_option( 'tracker_all_pages' );
 		/**
@@ -72,7 +77,6 @@ class Tracker {
 			$post_author         = is_object( $post ) && ( (int) $current_user->ID === (int) $post->post_author ); // Is the current user the post author?
 			$current_user_admin  = ( current_user_can( 'manage_options' ) ) ? true : false;  // Is the current user an admin?
 			$current_user_editor = ( ( current_user_can( 'edit_others_posts' ) ) && ( ! current_user_can( 'manage_options' ) ) ) ? true : false;    // Is the current user an editor?
-			$is_bot              = Helpers::is_bot();
 
 			$include_code = true;
 			if ( ( $post_author ) && ( ! in_array( 'authors', $track_users, true ) ) ) {
@@ -87,10 +91,6 @@ class Tracker {
 			if ( ( $current_user->exists() ) && ( ! \tptn_get_option( 'logged_in' ) ) ) {
 				$include_code = false;
 			}
-			if ( $is_bot && \tptn_get_option( 'no_bots' ) ) {
-				$include_code = false;
-			}
-
 			if ( $include_code ) {
 
 				$id               = $is_singular && is_object( $post ) ? absint( $post->ID ) : 0;
@@ -301,7 +301,7 @@ class Tracker {
 		$activate_counter = in_array( 'overall', $trackers, true ) ? 1 : 0;
 		$activate_counter = $activate_counter + ( in_array( 'daily', $trackers, true ) ? 10 : 0 );
 
-		if ( 0 === $activate_counter ) {
+		if ( 0 === $activate_counter || Koko_Analytics::is_tracking_disabled() ) {
 			return $content;
 		}
 
@@ -389,6 +389,10 @@ class Tracker {
 	 * @return bool True when the request may be tracked.
 	 */
 	public static function is_tracking_request_allowed() {
+		if ( Koko_Analytics::is_tracking_disabled() ) {
+			return false;
+		}
+
 		foreach ( array( 'HTTP_SEC_PURPOSE', 'HTTP_PURPOSE' ) as $header ) {
 			$value = isset( $_SERVER[ $header ] ) && is_string( $_SERVER[ $header ] )
 				? sanitize_text_field( wp_unslash( $_SERVER[ $header ] ) )

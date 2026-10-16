@@ -14,11 +14,13 @@
  * Plugin Name: WebberZone Top 10
  * Plugin URI:  https://webberzone.com/plugins/top-10/
  * Description: Count daily and total visits per post and display the most popular posts based on the number of views
- * Version:     4.5.3
+ * Version:     4.6.0
+ * Requires at least: 6.8
+ * Requires PHP: 7.4
  * Author:      WebberZone
  * Author URI:  https://webberzone.com
  * License:     GPL-2.0+
- * License URI: http://www.gnu.org/licenses/gpl-2.0.txt
+ * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain: top-10
  * Domain Path: /languages
  * GitHub Plugin URI: https://github.com/WebberZone/top-10/
@@ -36,7 +38,7 @@ if ( ! defined( 'WPINC' ) ) {
  * @since 3.1.0
  */
 if ( ! defined( 'TOP_TEN_VERSION' ) ) {
-	define( 'TOP_TEN_VERSION', '4.5.3' );
+	define( 'TOP_TEN_VERSION', '4.6.0' );
 }
 
 /**
@@ -164,7 +166,7 @@ if ( ! has_action( 'admin_notices', __NAMESPACE__ . '\\tptn_show_deactivation_no
  * @var string
  */
 global $tptn_db_version;
-$tptn_db_version = '7.3';
+$tptn_db_version = '7.4';
 
 // Load the Composer autoloader (includes the Freemius SDK).
 $composer_autoload = plugin_dir_path( __FILE__ ) . 'vendor/autoload.php';

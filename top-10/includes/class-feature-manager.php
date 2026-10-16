@@ -55,12 +55,20 @@ class Feature_Manager {
 				'setting' => 'enable_legacy_widgets',
 				'default' => true,
 			),
+			'abilities_api'           => array(
+				'setting' => 'enable_abilities_api',
+				'default' => true,
+			),
 			'rest_api'                => array(
 				'setting' => 'enable_rest_api',
 				'default' => true,
 			),
 			'lazy_load'               => array(
 				'setting' => 'enable_lazy_load',
+				'default' => true,
+			),
+			'advanced_block'          => array(
+				'setting' => 'enable_advanced_block',
 				'default' => true,
 			),
 			'query_block'             => array(

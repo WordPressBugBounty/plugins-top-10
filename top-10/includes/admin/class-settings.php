@@ -11,6 +11,7 @@ use WebberZone\Top_Ten\Admin\Settings\Settings_API;
 use WebberZone\Top_Ten\Admin\Settings\Settings_Sanitize;
 use WebberZone\Top_Ten\Frontend\Display;
 use WebberZone\Top_Ten\Frontend\Media_Handler;
+use WebberZone\Top_Ten\Integrations\Koko_Analytics;
 use WebberZone\Top_Ten\Util\Helpers;
 use WebberZone\Top_Ten\Util\Hook_Registry;
 
@@ -225,6 +226,8 @@ class Settings {
 			'enable_blocks'                  => 1,
 			'enable_legacy_widgets'          => 1,
 			'enable_rest_api'                => 1,
+			'enable_abilities_api'           => 1,
+			'enable_advanced_block'          => 1,
 			'enable_query_block'             => 1,
 			'enable_featured_image_block'    => 1,
 			'enable_popular_posts_pro_block' => 1,
@@ -635,6 +638,14 @@ class Settings {
 				'type'    => 'numbercsv',
 				'default' => '',
 			),
+			'data_mode'            => array(
+				'id'      => 'data_mode',
+				'name'    => esc_html__( 'Data source', 'top-10' ),
+				'desc'    => self::get_data_mode_description(),
+				'type'    => 'radiodesc',
+				'default' => Koko_Analytics::MODE_TOP10,
+				'options' => self::get_data_modes(),
+			),
 			'tracker_header'       => array(
 				'id'   => 'tracker_header',
 				'name' => '<h3>' . esc_html__( 'Tracker settings', 'top-10' ) . '</h3>',
@@ -687,7 +698,7 @@ class Settings {
 			'track_feed_views'     => array(
 				'id'      => 'track_feed_views',
 				'name'    => esc_html__( 'Track feed views', 'top-10' ),
-				'desc'    => esc_html__( 'Count post views from RSS/Atom feed readers via a tracking pixel. Views are added to the post\'s regular view count. Note: some feed readers block remote images by default; views are only counted when the reader loads images.', 'top-10' ),
+				'desc'    => esc_html__( 'Count post views from RSS/Atom feed readers via a tracking pixel. Views are added to the post\'s regular view count and also reported separately in the Feed vs web tab of the Top 10 dashboard. Note: some feed readers block remote images by default; views are only counted when the reader loads images.', 'top-10' ),
 				'type'    => 'checkbox',
 				'default' => false,
 				'pro'     => true,
@@ -1379,6 +1390,14 @@ class Settings {
 				'type'    => 'checkbox',
 				'default' => 1,
 			),
+			'enable_advanced_block'          => array(
+				'id'      => 'enable_advanced_block',
+				'name'    => esc_html__( 'Top 10 Popular Posts — Advanced block', 'top-10' ),
+				'desc'    => esc_html__( 'Registers the Advanced Popular Posts block with editable cards and layout patterns.', 'top-10' ),
+				'type'    => 'checkbox',
+				'default' => 1,
+				'pro'     => true,
+			),
 			'enable_query_block'             => array(
 				'id'      => 'enable_query_block',
 				'name'    => esc_html__( 'Query block', 'top-10' ),
@@ -1495,6 +1514,13 @@ class Settings {
 				'name' => '<h3>' . esc_html__( 'API integrations', 'top-10' ) . '</h3>',
 				'desc' => esc_html__( 'Control the Top 10 REST API endpoints used by integrations, tracking, blocks, and lazy loading.', 'top-10' ),
 				'type' => 'header',
+			),
+			'enable_abilities_api'           => array(
+				'id'      => 'enable_abilities_api',
+				'name'    => esc_html__( 'Abilities API', 'top-10' ),
+				'desc'    => esc_html__( 'Expose popular posts and view counts to authenticated integrations on WordPress 6.9+. Pro also exposes count editing and cache clearing. These abilities work independently of the Top 10 REST API endpoints.', 'top-10' ),
+				'type'    => 'checkbox',
+				'default' => 1,
 			),
 			'enable_rest_api'                => array(
 				'id'      => 'enable_rest_api',
@@ -1764,6 +1790,75 @@ class Settings {
 		 * @param array $trackers Different trackers.
 		 */
 		return apply_filters( self::$prefix . '_get_tracker_types', $trackers );
+	}
+
+	/**
+	 * Function returns the different data modes.
+	 *
+	 * @since  4.6.0
+	 * @return array Data modes.
+	 */
+	public static function get_data_modes() {
+
+		$modes = array(
+			array(
+				'id'          => Koko_Analytics::MODE_TOP10,
+				'name'        => __( 'Top 10', 'top-10' ),
+				'description' => __( 'Top 10 tracks views and powers the popular posts (default)', 'top-10' ),
+			),
+			array(
+				'id'          => Koko_Analytics::MODE_HYBRID,
+				'name'        => __( 'Hybrid', 'top-10' ),
+				'description' => __( 'Koko Analytics powers the popular posts while Top 10 keeps tracking views and counts', 'top-10' ),
+			),
+			array(
+				'id'          => Koko_Analytics::MODE_KOKO,
+				'name'        => __( 'Koko Analytics only', 'top-10' ),
+				'description' => __( 'Koko Analytics powers the popular posts. Top 10 stops tracking and hides the view counts it adds to posts and the admin post lists', 'top-10' ),
+			),
+		);
+
+		/**
+		 * Filter the array containing the data modes.
+		 *
+		 * @since 4.6.0
+		 *
+		 * @param array $modes Data modes.
+		 */
+		return apply_filters( self::$prefix . '_get_data_modes', $modes );
+	}
+
+	/**
+	 * Get the description for the data source setting.
+	 *
+	 * @since 4.6.0
+	 *
+	 * @return string Description.
+	 */
+	public static function get_data_mode_description() {
+		$labels = wp_list_pluck( self::get_data_modes(), 'name', 'id' );
+		$mode   = Koko_Analytics::get_effective_mode();
+		$status = '<strong>' . sprintf(
+			/* translators: %s: Data mode name. */
+			esc_html__( 'In use: %s.', 'top-10' ),
+			esc_html( $labels[ $mode ] ?? $mode )
+		) . '</strong> ';
+		if ( Koko_Analytics::is_available() ) {
+			/* translators: %s: Koko Analytics version. */
+			$status .= sprintf( esc_html__( 'Koko Analytics %s detected.', 'top-10' ), esc_html( Koko_Analytics::get_version() ) ) . ' ';
+		}
+
+		$desc = $status . esc_html__( 'Koko Analytics counts page views per day, so custom periods are rounded to whole days and overall counts cover the data Koko Analytics keeps. In network-wide lists, each site uses its own Koko Analytics data, or Top 10 counts where Koko Analytics is not active.', 'top-10' );
+
+		if ( ! Koko_Analytics::is_available() ) {
+			$desc .= ' <strong>' . sprintf(
+				/* translators: %s: Link to the Koko Analytics plugin. */
+				esc_html__( 'Install and activate %s to use the Hybrid or Koko Analytics only modes.', 'top-10' ),
+				'<a href="https://wordpress.org/plugins/koko-analytics/" target="_blank">Koko Analytics</a>'
+			) . '</strong>';
+		}
+
+		return $desc;
 	}
 
 	/**
