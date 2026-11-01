@@ -2,7 +2,7 @@
 Tags: popular posts, post views, page views, most viewed posts, popular posts widget
 Contributors: webberzone, ajay
 Donate link: https://wzn.io/donate-wz
-Stable tag: 4.6.0
+Stable tag: 4.6.1
 Requires at least: 6.8
 Tested up to: 7.1
 Requires PHP: 7.4
@@ -149,6 +149,19 @@ Report security bugs through the [Patchstack Vulnerability Disclosure Program](h
 
 == Changelog ==
 
+= 4.6.1 =
+
+Release date: 1 November 2026
+
+**Security**
+
+* Hardened popular posts lists so they no longer show attachments of private, draft or other unpublished posts.
+* Hardened the `post_status` and `post_type` attributes of the `[tptn_list]` shortcode, which now accept only published content and viewable post types.
+
+**Fixed**
+
+* On attachment pages, and in search results that included an attachment, posts without a featured image used that attachment as their thumbnail.
+
 = 4.6.0 =
 
 Release date: 15 October 2026
@@ -192,6 +205,9 @@ Release post: https://webberzone.com/announcements/top-10-v4-6/
 For the changelog of earlier versions, please refer to the [releases page on GitHub](https://github.com/WebberZone/top-10/releases).
 
 == Upgrade Notice ==
+
+= 4.6.1 =
+Hardens popular posts lists against showing unpublished content and fixes wrong thumbnails on attachment pages. Also fixes Pro lazy loaded lists on cached pages. Update recommended.
 
 = 4.6.0 =
 Security fixes prevent protected excerpts and images leaking through popular posts lists. Adds Koko Analytics, Abilities API support, and Pro Advanced blocks and feed reports. Lists spanning network sites now need Pro. Update recommended.
